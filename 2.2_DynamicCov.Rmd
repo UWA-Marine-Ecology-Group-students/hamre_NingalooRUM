@@ -1,0 +1,94 @@
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width = 10, fig.height = 7) 
+
+# libraries 
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+library(sf)
+library(RNetCDF)
+library(ncdf4)
+library(googledrive)
+library(corrplot)
+library(windfetch)
+
+# functions
+source("./functions/spatialFunc.R") # spatial functions
+
+# data
+dat <- read_csv("./ignore/02_data/2.1_esp.csv")
+
+## spatial
+### gpkg - ESPG 4283 (GDA94)
+# sites <- readRDS("./data/gpkg/2.0_espSites_4283.gpkg") # sites with static attributes
+coast <- st_read("./data/gpkg/espCoast_4283.gpkg") # coast
+```
+
+# Data prep
+```{r data prep}
+# # making use data spatial 
+spdat <- dat %>%
+  filter(!is.na(UseLat), !is.na(UseLong)) %>%
+  st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
+```
+
+
+# Enviromental variables
+## SST
+```{r}
+coast_lambert <- coast %>%
+  st_transform(crs = 3112) # need land lambert shp file loaded
+
+sst_kelvins <- get_sst(spdat$TripDate, spdat$centroidLong, spdat$centroidLat) # getting sst
+
+sst_celcius <- sst_kelvins - 273.15 # convert to celcius
+
+spdat$sst <- sst_celcius
+```
+
+## Swell height and wind speed
+Data is extracted for morning: 8-10, midday: 11-1 and afternoon: 2-4. 
+Not very high res - not useful for area whith lots of islands like Esperance. 
+```{r hs and ws}
+# hsws <- get_hs_ws_day(spdat$Date, spdat$centroidLong, spdat$centroidLat) # getting hs and ws
+# 
+# # making a numeric hour column
+# spdat$MedianHour <- as.numeric(gsub("\\:.*$", "", spdat$MedianTime))
+# 
+# # catagorising time of day
+# spdat$TimeOfDay <- with(spdat,  ifelse(MedianHour >= 5 & MedianHour <= 10, "Morning",
+#                             ifelse(MedianHour >= 11 & MedianHour <= 13, "Midday", 
+#                                    ifelse(MedianHour >= 14 & MedianHour <= 18, "Afternoon", NA))))
+# # spdat[, c("MedianTime", "MedianHour", "TimeOfDay")] # check it has worked
+# 
+# hsws_df <- as.data.frame(hsws)
+# 
+# spdat <- spdat %>% 
+#   mutate(SwellHeight = ifelse(TimeOfDay %in% "Morning", hsws$hs_morning,
+#                               ifelse(TimeOfDay %in% "Midday", hsws$hs_midday, hsws$hs_afternoon))) %>% 
+#   mutate(WindSpeed = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
+#                               ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
+#                                      hsws$wspeed_afternoon)))
+```
+
+# Plotting corroloation matrix
+```{r corr}
+num_dat <- dplyr::select_if(dat, is.numeric) # subset to numericv variables
+cor <- round(cor(num_dat, use = "complete.obs"), 2) # get correlations
+corrplot <- corrplot(cor) # plot correlations
+cor
+
+```
+
+# Save output
+```{r save}
+saveRDS(spdat, "./ignore/02_data/2.2_espSites_4283.gpkg")
+
+dat <- spdat %>%  st_drop_geometry %>% as.data.frame()
+write.csv(dat, "./ignore/02_data/2.2_espSites.csv")
+```

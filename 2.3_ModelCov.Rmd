@@ -1,0 +1,98 @@
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width=10, fig.height=7) 
+
+# libraries
+library(ggBRT)
+library(gbm)
+library(dismo)
+library(MASS)
+library(dplyr)
+
+# functions
+source("./functions/brtFunc.R")
+
+# data
+dat <- readRDS("./ignore/2.1espSites_4283.gpkg") # sites with static attributes
+```
+
+```{r data prep for BRTs}
+dat <- dat %>% 
+  filter(FishingType %in% c("Casting", "Demersal") )
+
+# brts can only work with factor 
+dat <- dat %>%
+  mutate_if(is.character, as.factor) %>% 
+  mutate(ArtInfra_present = as.factor(ArtInfra_present))
+
+# making a grid for step.loop
+res.dev<-c() ## make a res.dev variable to store in grid
+
+## make grid of lr, tc and bag.fraction that gbm.step will run through
+step.loop<-expand.grid(lr=c(0.01, 0.05, 0.001), tc=c(2, 5, 7), bf=c(0.5, 0.75, 0.9), ss=c(5, 20, 30)) 
+
+step.loop$res.dev<-NA ## add res.dev to grid
+
+# define response
+nHooked <- which(colnames(dat)=="nHooked") 
+
+# defining covariates
+cov <- which(colnames(dat) %in% 
+               c("facYear", "nTimesLast24m","exDecMedianTime","Depth", "UseLat", "FishingType",
+                 "BaitLure","UseLong", "DecFishingHr","MaxHook","bin_exTimes12m","BoatLength", 
+                 "LunarPhase", "sst", "Pelagic","Sand", "Reef", "Rubble", "Silt", "Seagrass", 
+                 "Macroalgae", "km_mainland", "ArtInfra_present", "SwellHeight", "WindSpeed"))
+
+#Set up CV
+  k = 10 #number of folds
+  p <- unique(dat$PersonID)
+  p <- data.frame(PersonID = (sample(p)))# shuffle the data
+  p$k <- 
+    c(rep(1:k, floor(nrow(p)/k)), sample(1:k, size = nrow(p) - length(rep(1:k, floor(nrow(p)/k)))))
+  dat <- left_join(dat, p, by = "PersonID")
+  table(dat$k) #k provides indicator for 10 fold cross validation
+```
+
+```{r dp.step loop, warning=FALSE}
+# This first gbm.step is looping through parameters so i can select the optimal model
+for(i in 1:nrow(step.loop)) {
+  modtest<-dismo::gbm.step(data=dat,
+                           gbm.x=c(cov), ## covariates
+                           gbm.y=nHooked, ## response - number of fish depredated
+                           fold.vector = dat$k,
+                           n.folds = k,
+                           lr = step.loop[i,"lr"], ## ref to step.loop
+                           tree.complexity = step.loop[i,"tc"], ## ref to step.loop
+                           family="poisson", ## distribution family
+                           bag.fraction = step.loop[i,"bf"],
+                           step.size = step.loop[i, "ss"],
+                           plot.main = F)
+  step.loop[i, "res.dev"] <-step$self.statistics$mean.resid ### store res.dev in step.loop
+  step.loop[i, "nt"] <-step$n.trees}
+# 
+# # Full loop data set if intere
+# # step.loop
+# opt.resdev <- step.loop[step.loop$res.dev==min(step.loop$res.dev, na.rm= T),]
+# opt.resdev <- opt.resdev %>% drop_na()
+# opt.resdev
+# opt.nt <- step.loop[step.loop$nt==max(step.loop$nt, na.rm= T),]
+# opt.nt <- opt.nt %>% drop_na()
+# opt.nt
+# 
+# opt <- full_join(opt.resdev, opt.nt)
+# opt <- opt %>% drop_na
+# opt
+# 
+# dp.brt<-dismo::gbm.step(data=dpdat,
+#                            gbm.x=c(DPcov),
+#                            gbm.y=nDP,## response - number of fish depredated
+#                            offset=dp_offset,
+#                            fold.vector = dpdat$k,
+#                            n.folds = k,
+#                            learning.rate = dp_opt.nt$lr, ## ref to step.loop
+#                            tree.complexity = dp_opt.nt$tc, ## ref to step.loop
+#                            family="poisson", ## distribution family
+#                            bag.fraction=dp_opt.nt$bf,
+#                            step.size = dp_opt.nt$ss)
+#                           
+```

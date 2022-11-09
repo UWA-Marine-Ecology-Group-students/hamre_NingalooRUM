@@ -1,0 +1,165 @@
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width = 10, fig.height = 7) 
+
+# libraries 
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+library(sf)
+library(googledrive)
+library(units)
+library(nngeo)
+library(magrittr)
+
+# data
+## gpkg - ESPG 4283 (GDA94)
+sites <- readRDS("./data/gpkg/2.0_Sites_4283.gpkg") %>% filter(!is.na(Depth)) # sites with static attributes - checked the depth, some depths havent been calculated along lower edge, okay to filter, no recreation
+dat <- read_csv("data/01_data/1.2_dat.csv") %>% filter(ActivityType == "Extractive")
+# dat <- read_csv("data/01_data/1.2_dat.csv") %>% filter(FishingType %in% c("Casting", "Demersal"))
+BR <- st_read("./data/gpkg/BR_4283.gpkg") %>%  dplyr::select(RampID) # boat ramps
+
+sf_use_s2(FALSE)
+```
+
+# Wrangling number of trips from boat ramp data
+This data (BRtrips) was from Matts national RUM. It was made by...
+
+   - Getting the annual number of boat launches for South Coast
+   - Calculate the proportion of launches that would happen each month
+   - Applying a gravity function to the monthly proportions. Lets calculates the estimated number of launches      per boat ramp given their populations. There are some issues with this, for example, Exmouth marina           would should more trips than Tanatbiddi because it closer proximity to a population hub, same for             Esperanace and Bandy Creek.
+   - The increasing number in the columns represents a change in the assumptions of the gravity function. The      higher the number the more the boat ramps interfere with each other given there proximity together. 
+
+```{r}
+BRtrips <- read.csv("./data/02_data/Trips_Ramp_out.csv") %>% 
+  filter(State_reg == "WA" & Name_reg == "West Coast") # filter to state and region
+
+# check ramps names
+# unique(BRtrips$Ramp_name)
+
+BRtrips <- BRtrips %>% 
+  filter(Ramp_name %in% c("Hillarys Marina", "Mindarie Marina", "Ocean Reef Marina", "Two Rocks Marina")) %>% 
+  dplyr::select(Ramp_name, RampID, Month, TRIPS_ramp_prop_Grvt__5, upp_TRIPS_Grvt__5, low_TRIPS_Grvt__5) %>% 
+  group_by(RampID, Ramp_name) %>%
+  summarize(across(where(is.numeric), list(sum), .names = "{.col}")) %>% # summing across months to get annual estimates
+  mutate(RampID = as.numeric(RampID))
+
+BRtrips <- left_join(BRtrips, BR, by = c("RampID")) %>% # join to geometry
+  st_as_sf()
+
+write_csv(BRtrips, "./data/02_data/2.1_BRtrips.csv")
+saveRDS(BRtrips, "./data/gpkg/2.1_BRtrips.gpkg")
+```
+
+# Make choice set
+```{r choice set}
+# making choice set
+sites <- sites |> st_sf() |> # wont work without st_sf()
+  rename(gridID_alt = gridID) %>% # limiting choice set to within 100km of boat ramp
+  filter(as.numeric(km_BR) <= 100) %>% # need gridID names to be different
+  mutate(travelCost = as.numeric(0.54*km_BR)) %>% 
+  dplyr::select(-polyCentroid) # if you need dynamic varibles hash this out
+
+# make a small data set to join gridID_vis to
+gridID_vis <- sites %>% 
+  dplyr::select(gridID_alt, geom, km_BR) %>% 
+  distinct() 
+# which(duplicated(gridID_vis$gridID)==TRUE) # should be none
+
+# Writing choice set to ID grids to close
+choice <- sites %>% dplyr::select(gridID_alt, geom)
+
+# # st_write(choice, "./data/gpkg/2.1_ChoiceSetQ_4283.gpkg", append = FALSE) # need to write with st_write to open in QGISRUMs
+
+# saveRDS(sites, "./data/gpkg/2.1_ChoiceSet_4283.gpkg")
+saveRDS(sites, "./data/gpkg/2.1_ChoiceSet_dem_4283.gpkg")
+```
+
+
+# Trip attribute data
+```{r trip attributes}
+# need one trip per row (longest site visited on trip)
+dat <- dat %>% 
+  group_by(PersonID, TripID) %>% 
+  slice(which.max(decDuration)) %>% 
+  ungroup()
+# which(duplicated(dat$TripID) == TRUE) # Should be none
+
+# add gridID_vis
+# making use data spatial 
+spdat <- dat %>%
+  filter(!is.na(UseLat), !is.na(UseLong)) %>% 
+  st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
+
+# allocating sites to grids
+spdat <- spdat %>%
+  st_join(gridID_vis, left = T, join = st_intersects)
+
+# selecting attributes, and tidying
+dat <- spdat %>% 
+  # filter(as.numeric(km_BR) <= 100)
+  rename(gridID_vis = gridID_alt) %>% 
+  filter(ActivityType %in% "Extractive") %>% 
+  dplyr::select(TripID, PersonID, gridID_vis, Site, TripDate) %>% 
+  distinct() %>% 
+  mutate(BR = ifelse(Site %in% "Hillarys", "104", NA),
+         BR = ifelse(Site %in% "Mindarie", "105", BR),
+         BR = ifelse(Site %in% "OceanReef", "106", BR),
+         BR = ifelse(Site %in% "TwoRocks", "112", BR)) %>% 
+  mutate(UseLong = st_coordinates(.)[,1]) %>% 
+  mutate(UseLat = st_coordinates(.)[,2]) %>% 
+  as.data.frame()
+
+# which(is.na(dat$gridID_vis)==TRUE)
+# this chunk should give you a data set with one trip per row, with a few trip/fisher attributes and the ID of visited grids 
+```
+
+# Join data
+```{r join}
+og_dat <- dat # copying original data test join
+
+dat <- inner_join(dat, sites, by = "BR") # FALSE
+
+# testing join
+a <- as.data.frame(table(og_dat$BR)) %>% rename(launches = Freq)
+b <- as.data.frame(table(sites$BR)) %>%  rename(sites_within_100km = Freq)
+c <- left_join(a, b)
+c$times <- c$launches*c$sites_within_100km
+test = sum(c$times)
+test == nrow(dat) # this should be TRUE
+
+# ggplot()+
+#   geom_sf(data = sites) +
+#   geom_sf(data = dat$geometry)
+```
+
+# Choice and travel cost ($0.54/km)
+```{r choice and travel cost}
+dat <- dat %>% 
+  # mutate(centroidLong = st_coordinates(polyCentroid)[,1]) %>% # need this is using dynamic variables
+  # mutate(centroidLat = st_coordinates(polyCentroid)[,2]) %>%
+  mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>% 
+  mutate(travelCost = as.numeric(0.54*km_BR)) %>% 
+  dplyr::select(-c(geom, geometry)) %>% 
+  mutate(area = as.numeric(area)) %>% 
+  filter(area != 0)
+```
+
+
+
+# Save output
+```{r save}
+write_csv(dat, "./data/02_data/2.1_dat.csv")
+# write_csv(dat, "./data/02_data/2.1_dat_dem.csv")
+```
+
+
+```{r}
+#  cor <- round(cor(dat[,c("Depth", "km_mainland", "isl_adj", "shelter", "Lhex", "Shex", "Mhex", "travelCost")], use='complete.obs'), 2)
+# cor
+```
+

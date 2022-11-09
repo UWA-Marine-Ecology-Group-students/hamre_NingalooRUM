@@ -1,0 +1,42 @@
+# Set Up
+```{r setup, include = FALSE}
+# librarys
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+library(sf)
+
+# functions
+source("./functions/cleaningFunc.R") # spatial functions
+
+# data
+dat <- read_csv("./data/01_data/1.1_dat.csv")
+
+# spatial data
+coast <- st_read("./data/gpkg/Coast_4283.gpkg")
+```
+
+# Remove points on land
+```{r}
+spdat <- dat %>%
+  filter(!is.na(UseLat), !is.na(UseLong)) %>% 
+  st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
+
+# remove those on land
+dat <- spdat %>% 
+  mutate(Location = ifelse(st_intersects(spdat, coast), "Land")) %>% 
+  mutate(Location = ifelse(is.na(Location), "Water", Location)) %>% 
+  filter(Location %in% "Water") %>% 
+  mutate(UseLong = sf::st_coordinates(.)[,1],
+         UseLat = sf::st_coordinates(.)[,2]) %>% 
+  st_drop_geometry() %>% 
+  as.data.frame() 
+```
+
+```{r save}
+write.csv(dat, "./data/01_data/1.2_dat.csv", row.names = FALSE) # Fully cleaned data
+```

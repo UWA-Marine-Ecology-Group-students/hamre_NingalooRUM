@@ -1,0 +1,102 @@
+# Set Up
+```{r setup, include = FALSE}
+# librarys
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(chron)
+library(lunar)
+library(ggplot2)
+```
+
+# Data Prep
+After downloading the data from arcCollector, you end up four individual .csv docs for each survey layer; 
+
+  - Meta
+  - Extractive Use 
+  - Non-Extractive Use
+  - Avidity
+
+1. Read in documents, including `na = c("", " ")` to make all empty cells consistent
+
+# Data Join {.tabset} 
+After downloading the data from arcCollector, you end up three individual .csv docs for each survey layer; meta, use, avidity. Join the three sets of data, linking them by their GlobalID (primary key) and GUID (foreign key). 
+
+meta (GlobalID) -> use GUID
+                   use GlobalID -> avidity GUID
+                   
+Before joining dataset make sure none of the linking keys contain NAs. NAs may appear if someone has deleted only one part of the survey eg. deleted the avidity survey but not the related use and meta. This is likely the case for dummys. If they are dummys they should be filtered out on each individual csv before joining. If there are completed surveys that have an NAs in a linking key, use logical detective skills to manual find the associated key. A good starting point is using `anti_join` which can show you what surveys don't marry up, and then using CreationDate to find closest match and go from there. 
+
+1. Read in documents, including `na.strings = c("", " ")` to make all empty cells consistent
+
+```{r  readData}
+meta <- read.csv("data/RAW/Data-250921/meta_0921.csv", na.strings = c("", " "))
+use <- read.csv("data/RAW/Data-250921/use_0921.csv", na.strings = c("", " "))
+avidity <- read.csv("data/RAW/Data-250921/avidity_0921.csv", na.strings = c("", " "))
+jon <- read.csv("data/RAW/Data-jon/ALL3TRIPSMASTERDATASETFEB22.csv", na.strings = c("", " "))
+```
+
+For each individual dataset: 
+  2. Give ID variables intuitive names
+  3. Manually add any missing linking IDs
+  4. Filter out dummy surveys
+  5. Filter out data from before first day of sampling (26/09/2020) - this removes Harrys Canarvon data and dummys done on 25/09/2020)
+
+```{r  individual dataset edits}
+meta <- meta %>%
+  rename(mObjID = OBJECTID,
+         mGlobID = GlobalID,
+         mGUID = Guid) %>%
+  dplyr::filter_all(all_vars(!grepl('ummy', .))) %>% # getting rid of Dummys/dummys
+  dplyr::filter_all(all_vars(!grepl("lah", .)))  %>% # getting rid of blah blahs
+  dplyr::mutate(CreationDate = parse_date_time(CreationDate, c("mdY IMS p"))) %>% # making POSIX
+  dplyr::mutate(tDate = as.Date(as.character(as.Date(substr(CreationDate, 1, 10), "%Y-%m-%d")))) %>%
+  dplyr::filter(tDate > "2020-09-25") %>% # filtering carnarvon data
+  dplyr::select(-c(tDate)) # made a temporary date col to do this as i already have code dealing with date later
+
+use <- use %>%
+  dplyr::rename(uObjID = OBJECTID,
+         uGlobID = GlobalID,
+         uGUID = Guid) %>%
+  dplyr::mutate(uGUID = ifelse(str_detect(CreationDate, "9/27/2020 7:08:03 AM"), "706f2244-30f9-48f5-9bf0-9c5ebf9d8766", uGUID)) %>%
+  dplyr::filter_all(all_vars(!grepl('ummy', .))) %>% # getting rid of Dummys/dummys
+  dplyr::filter_all(all_vars(!grepl("lah", .))) %>% # getting rid of blah blahs
+  dplyr::mutate(CreationDate = parse_date_time(CreationDate, c("mdY IMS p"))) %>% # making POSIX
+  dplyr::mutate(Date = as.Date(as.character(as.Date(substr(CreationDate, 1, 10), "%Y-%m-%d")))) %>%
+  dplyr::filter(Date > "2020-09-25") %>% # filtering carnarvon data
+  dplyr::select(-c(Date))
+
+avidity <- avidity %>%
+  rename(aObjID = OBJECTID,
+         aGlobID = GlobalID,
+         aGUID = Guid) %>%
+  mutate(aGUID = ifelse(str_detect(CreationDate, "9/27/2020 7:53:16 AM"), "7008d806-f10e-49cc-b866-1e3ec6848b2e", aGUID)) %>%
+  dplyr::filter_all(all_vars(!grepl('ummy', .))) %>% # getting rid of Dummys/dummys
+  dplyr::filter_all(all_vars(!grepl("lah", .))) %>% # getting rid of blah blahs
+  dplyr::mutate(CreationDate = parse_date_time(CreationDate, c("mdY IMS p"))) %>% # making POSIX
+  dplyr::mutate(Date = as.Date(as.character(as.Date(substr(CreationDate, 1, 10), "%Y-%m-%d")))) %>%
+  dplyr::filter(Date > "2020-09-25") %>% # filtering carnarvon data
+  dplyr::select(-c(Date))
+```
+
+In a complete survey with 2 uses you would expect a 1:2:1 ratio of meta:use:avidity observations - when theses are joined you would expect this to become two observations with the meta and avidity duplicated. 
+
+However, looking at number of observations in dfs, there will not be the same number of obs in meta and avidity as as some meta surveys might be refusals so you would not expect there to be an associated avidity survey. Generally you would expect there to be more use obs than meta as one meta survey can have multiple uses, and you would expect less avidity obs than meta, due to the refusals. 
+
+5. `full_join` meta and use -> MetaUse (can't use inner join as it will remove the refusals - which we need for response rate calculations)
+6. `full_join` MetaUse and avidity
+7. `bind_rows` to stack Jon's data onto newly merged data set
+
+Test all joins and see which one is right
+```{r  join}
+MetaUse <- full_join(meta, use, by = c("mGlobID" = "uGUID"), keep = T) # joining meta and use
+Ning0921 <- full_join(MetaUse, avidity, by = c("uGlobID" = "aGUID"), keep = T) %>% #joining metause with avidity
+  rename(nDate = Date)
+
+Ning <- bind_rows(Ning0921, jon) # adding in jons data
+```
+
+```{r csv}
+write.csv(Ning0921, 'data/RAW/Data-250921/Ning0921.csv') # My up to date unleaned data
+write.csv(Ning, 'data/RAW/RAW.csv') # full raw uncleaned dataset including Jon's data.
+```

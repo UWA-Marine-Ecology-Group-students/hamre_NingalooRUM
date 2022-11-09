@@ -1,0 +1,84 @@
+---
+title: "Marmion RUM Data"
+author: "Nicole Hamre"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+    # html_document:
+    #     css: bootstrap.css
+  bookdown::html_document2:
+    self_contained: false
+    df_print: paged
+    toc: yes
+    toc_float: yes
+    smooth_scroll: true
+    theme: paper
+    number_sections: false
+    highlight: tango
+---
+
+```{r setup, include = FALSE}
+# knitr options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width=10, fig.height=7) 
+
+# libraries
+library(tidyverse)
+library(sp)
+library(raster)
+library(ggplot2)
+library(rgeos)
+library(rgdal)
+library(sf)
+library(RColorBrewer)
+library(ggspatial)
+library(spatstat)
+library(patchwork)
+library(forcats)
+library(knitr)
+
+# source 
+source("./functions/basemap.R") # base map and spatial files
+portrait <- TRUE # set orientation of map
+landscape <- FALSE # set orientation of map
+
+# Data
+dat <- read.csv("./data/01_data/1.2_dat.csv")
+
+# Spatial
+spdat <- dat %>% 
+  filter(!is.na(UseLat), !is.na(UseLong)) %>% 
+  st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283) %>% 
+  mutate(UseLong = sf::st_coordinates(.)[,1], UseLat = sf::st_coordinates(.)[,2])
+
+# Parameters of data
+extractive = TRUE
+nonextractive = TRUE
+boat = TRUE
+shore = FALSE
+
+# set colour palette
+col1 <- c("#d48e84") 
+col2 <- c("#97c1a9")
+col3 <- c("dark grey") 
+
+# standard plot theme
+ax.title <- 14
+ax.text <- 9
+ax.legend <- 12
+strip <- 9
+a4_width <- 160
+my_theme <- theme_classic() + theme(axis.text=element_text(size = ax.text),
+                                    text = element_text(size = ax.text),
+                                    axis.title=element_text(size = ax.title),
+                                    line = element_line(size = 0.3),
+                                    strip.background = element_rect(colour = "white", fill = col3),
+                                    strip.text = element_text(size = strip),
+                                    legend.title = element_text(size = ax.legend),
+                                    legend.text = element_text(size = ax.legend),
+                                    plot.title = element_text(size = ax.title, hjust = 0.5))
+
+# map theme
+map_theme <- my_theme + theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r child = c('explore.Rmd')}
+```

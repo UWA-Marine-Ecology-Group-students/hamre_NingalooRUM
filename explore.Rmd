@@ -1,0 +1,680 @@
+```{r response stats}
+Approached <- dat %>%
+  distinct(PersonID, .keep_all = TRUE) 
+nApproached <- nrow(Approached) # the number of people approached
+
+nNE <- length(which(Approached$Agreement == "NE")) # number of people approached that were ineligible to participate in the survey
+nAgree <- length(which(Approached$Agreement == "Yes")) # number of people approached who agreed to participate in the survey, including repeats 
+nRefusals <- length(which(Approached$Agreement == "No")) # number of people approached who refused to take part in the survey, including repeats
+nIndPeople <- length(which(Approached$Agreement %in% "Yes" & Approached$PrevInter %in% "No")) # the number of individual people surveyed
+nMultiAgree <- nAgree - nIndPeople # number of multi-agreement surveys (total number of surveys repeated by previous participants - excluding their first survey)
+
+nSpPoints <- nrow(dat) - nRefusals - nNE # the total number of spatial data points
+nMultiUse <- nSpPoints - nAgree # the number of spatial point that were part of multi-use trips (excluding first instance)
+
+RefusalRate <- round((nRefusals/(nApproached - nNE))*100) # refusal rate
+ResponseRate <- round((nAgree/(nApproached - nNE))*100) # response rate
+```
+<br><br>
+
+> MEG Mission statement: **Optimising human use of the ocean**
+
+***
+# Data {.tabset}
+Data for recreational marine use in daterance was collected through face-to-face surveys at boat launches.  The surveys facilitated the collection of multi-use data and multi-greement data.The survey had a **`r ResponseRate`% response rate** with **`r nAgree` participants**, of those **`r nIndPeople` survey were first instance or single agreement surveys** and **`r nMultiAgree` were multi-agreement surveys** (survey participant surveyed for a second or more times). This produced a **total of `r nSpPoints` spatial use data points**, **`r nMultiUse` of which were part of multi-use trips** (excluding first instance).
+
+```{r data prep, include = FALSE}
+yes <- dat %>% 
+  filter(Agreement == "Yes") # agreement data (filtering out refusals and non-eligibles)
+
+if (boat == TRUE) { # boat based (extractive and non-extractive)
+  actb <- yes %>% filter(SiteType == "Boat")
+  # ifelse(nrow(actb) > 1, eval_actb <- TRUE, eval_actb <- FALSE)
+} 
+
+if (exists("actb")) {
+  ifelse(nrow(actb) > 1, eval_actb <- TRUE, eval_actb <- FALSE)
+} else if (!exists("actb")) {
+  eval_actb <- FALSE
+}
+
+
+if (shore == TRUE) { # shore based (extractive and non-extractive)
+  acts <- yes %>% filter(SiteType == "Shore") 
+} 
+
+if (exists("acts")) {
+  ifelse(nrow(acts) > 1, eval_acts <- TRUE, eval_acts <- FALSE)
+} else if (!exists("acts")) {
+  eval_acts <- FALSE
+}
+
+if (extractive == TRUE) { # extractive - boat and shore
+  ex <- yes %>% filter(Activity == "Fishing") 
+} 
+
+if (exists("ex")) {
+  ifelse(nrow(ex) > 1, eval_ex <- TRUE, eval_ex <- FALSE)
+} else if (!exists("ex")) {
+  eval_ex <- FALSE
+}
+
+if (boat == TRUE & extractive == TRUE) { # extractive - boat  
+  exb <- yes %>% filter(SiteType == "Boat" & ActivityType %in% c("Extractive", "Both")) 
+} 
+
+if (exists("exb")) {
+  ifelse(nrow(exb) > 1, eval_exb <- TRUE, eval_exb <- FALSE)
+} else if (!exists("exb")) {
+  eval_exb <- FALSE
+}
+
+if (shore == TRUE & extractive == TRUE) {  # extractive - shore  
+  exs <- yes %>% filter(SiteType == "Shore" & ActivityType %in% c("Extractive", "Both"))
+} 
+
+if (exists("exs")) {
+  ifelse(nrow(exs) > 1, eval_exs <- TRUE, eval_exs <- FALSE)
+} else if (!exists("exs")) {
+  eval_exs <- FALSE
+}
+
+if (nonextractive == TRUE) { # non-extractive - boat and shore 
+  nex <- yes %>% filter(Activity != "Fishing") 
+} 
+
+if (exists("nex")) {
+  ifelse(nrow(nex) > 1, eval_nex <- TRUE, eval_nex <- FALSE)
+} else if (!exists("nex")) {
+  eval_nex <- FALSE
+}
+
+if (boat == TRUE & nonextractive == TRUE) {  # non-extractive - boat 
+  nexb <- yes %>% filter(SiteType == "Boat" & ActivityType %in% c("NonExtractive"))
+}
+
+if (exists("nexb")) {
+  ifelse(nrow(nexb) > 1, eval_nexb <- TRUE, eval_nexb <- FALSE)
+} else if (!exists("nexb")) {
+  eval_nexb <- FALSE
+}
+
+if (shore == TRUE & nonextractive == TRUE) {  # non-extractive - shore  
+nexs <- yes %>% filter(SiteType == "Shore" & ActivityType %in% c("NonExtractive"))
+}
+
+if (exists("nexs")) {
+  ifelse(nrow(nexs) > 1, eval_nexs <- TRUE, eval_nexs <- FALSE)
+} else if (!exists("nexs")) {
+  eval_nexs <- FALSE
+}
+```
+
+
+## Response
+The plot below shows the number of agreements, refusals and non-eligible people that were approached in the sampling process. 
+```{r bar_response}
+dat %>% 
+  distinct(PersonID, .keep_all = TRUE) %>% 
+  ggplot() +
+   aes(x = fct_infreq(Agreement)) + 
+   geom_bar(fill = col1) +
+   labs(x = "Agreement to participate", y = paste("Frequency (n = ", nrow(Approached), ")", sep = "")) +
+   geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ggsave("./plots/explore/agree.png", width = 8, height = 4) 
+```
+
+
+```{r bar_sitetype, eval = boat & shore}
+# text
+asis_output("## Site type\nThe plot below shows the number of boat and shore based activities that were captured in the data.")
+
+# plot
+yes %>% 
+  ggplot() +
+   aes(x = fct_infreq(SiteType)) +
+   geom_bar(fill = col1) +
+   labs(x = "Site Type", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+   geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ ggsave("./plots/explore/bar_sitetype.png", width = 8, height = 4) 
+```
+
+
+```{r bar_year}
+# heading
+if (length(unique(yes$facYear)) > 1) {
+  asis_output("## Year\nThe plot below shows the how the data is distributed across years.")
+}
+
+# plot
+if (length(unique(yes$facYear)) > 1) {
+year<- yes %>%
+  ggplot()+
+  aes(x = as.factor(facYear)) +
+  geom_bar(fill = col1) +
+  labs(x = "Year", y = paste("Number of Participants (n = ", nrow(yes), ")", sep = "")) +
+  geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ ggsave("./plots/explore/bar_year.png", width = 8, height = 4) 
+ year
+}
+
+```
+
+# Demographics  {.tabset}
+***
+
+## Locality
+The plot below shows how many of the participants were residents and visitors.
+```{r bar_locality}
+ggplot(yes) + 
+   aes(x = fct_infreq(Resident)) +
+   geom_bar(fill = col1) +
+   labs(x = "Resident", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+   geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ ggsave("./plots/explore/bar_locality.png", width = 8, height = 4) 
+```
+
+## Age
+The plot below shows the ages of participants.
+```{r bar_age}
+ggplot(yes) + 
+   aes(x = binAge) +
+   geom_bar(fill = col1) +
+   labs(x = "Age of Participant", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+   geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ ggsave("./plots/explore/bar_age.png", width = 8, height = 4) 
+```
+
+## Gender
+The plot below shows the gender of participants.
+```{r bar_gender}
+ggplot(yes) + 
+   aes(x = fct_infreq(Sex)) +
+   geom_bar(fill = col1) +
+   labs(x = "Sex of Participant", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+   geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ ggsave("./plots/explore/bar_gender.png", width = 8, height = 4) 
+```
+
+
+```{r bar_exavid, eval = eval_ex}
+# text
+asis_output("## Fishing Avidity\nThe plot below shows the fishing avidity of participants.")
+
+# plot
+ggplot(yes) + 
+   aes(x = bin_exTimes12m) +
+   geom_bar(fill = col1) +
+   labs(x = "Number of times fished in last 12 months", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+   geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ ggsave("./plots/explore/bar_exavid.png", width = 8, height = 4) 
+```
+
+# Use
+***
+
+```{r kdens_all}
+# text
+if (boat == TRUE & shore == FALSE) {
+  asis_output("## Overall {.tabset}\nThis map shows the kernel density of all boat based uses, extractive and non-extractive.")
+} else if (boat == FALSE & shore == TRUE) {
+  asis_output("## Overall {.tabset}\nThis map shows the kernel density of all shore based uses, extractive and non-extractive.")
+} else if (boat == TRUE & shore == TRUE) {
+  asis_output("## Overall {.tabset}\nThe maps below show the kernel density of boat and shore based recreational usesm extractive and non-extractive.") 
+}
+
+# plot
+if (boat == TRUE & shore == FALSE) {
+  a <- actb %>% 
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom =
+                      "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme +
+    labs(title = "Boat based activities", x = "", y = "")
+  ggsave("./plots/explore/kdens_actb.png", width = 8, height = 4) 
+  print(a)
+} else if (boat == FALSE & shore == TRUE) {
+  b <- acts %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom =
+                      "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme +
+  labs(title = "Shore based activities")
+  ggsave("./plots/explore/kdens_acts.png", width = 8, height = 4) 
+  print(b)
+} else if (boat == TRUE & shore == TRUE & landscape == TRUE) {
+  a <- actb %>% 
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom =
+                      "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme +
+    labs(title = "Boat based activities", x = "", y = "")
+  ggsave("./plots/explore/kdens_actb.png", width = 8, height = 4) 
+  
+  b <- acts %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom =
+                      "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme +
+  labs(title = "Shore based activities")
+  ggsave("./plots/explore/kdens_acts.png", width = 8, height = 4) 
+  print(a)
+  print(b)
+} else if (boat == TRUE & shore == TRUE & portrait == TRUE) {
+  a <- actb %>% 
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom =
+                      "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme +
+    labs(title = "Boat based activities", x = "", y = "")
+  ggsave("./plots/explore/kdens_actb.png", width = 8, height = 4) 
+  
+  b <- acts %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom =
+                      "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme +
+  labs(title = "Shore based activities")
+  ggsave("./plots/explore/kdens_acts.png", width = 8, height = 4) 
+  print(a + b) 
+}
+```
+
+
+```{r bar_sp_acttype, eval = extractive & nonextractive}
+# text
+asis_output("### Activity Type\nThe plots below shows how many surveys are relevant to extractive and non-extractive activities and there spatial distribution.")
+
+# plots
+if (landscape == TRUE) {
+  a <- ggplot(yes) +
+    aes(x = fct_infreq(ActivityType)) +
+    geom_bar(fill = col1) +
+    labs(x = "Activity Type", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+    geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) + 
+    my_theme
+  ggsave("./plots/explore/bar_acttype.png", width = 8, height = 4) 
+ 
+ b <- basemap + 
+  geom_sf(data = spdat, aes(color = ActivityType), size = 0.5) +
+  scale_color_manual(values = c(col1, col2), name = "")
+  map_theme
+  ggsave("./plots/explore/sp_acttype.png", width = 8, height = 4) 
+print(a)
+print(b)
+} else if (portrait == TRUE) {
+  a <- ggplot(yes) +
+    aes(x = fct_infreq(ActivityType)) +
+    geom_bar(fill = col1) +
+    labs(x = "Activity Type", y = paste("Frequency (n = ", nrow(yes), ")", sep = "")) +
+    geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+    my_theme
+  ggsave("./plots/explore/bar_acttype.png", width = 8, height = 4) 
+
+ b <- basemap +
+  geom_sf(data = spdat, aes(color = ActivityType), size = 0.5) +
+  scale_color_manual(values = c(col1, col2), name = "") +
+  map_theme
+ggsave("./plots/explore/sp_acttype.png", width = 8, height = 4) 
+a + b
+ggsave("./plots/explore/bar_sp_acttype.png", width = 8, height = 4)
+print(a + b)
+}
+```
+
+
+
+```{r bar_actfreq, eval = extractive & nonextractive}
+# text
+asis_output("### Activities\nThe plots below shows what activities participants conducted and there spatial distribution.")
+
+# plots
+if (landscape == TRUE) {
+  a <- yes %>%  # replace with next line if map is portrait
+    ggplot(aes(y = fct_rev(fct_infreq(Activity)))) +
+    geom_bar(stat="count", fill = col1) +
+    labs(x = paste("Frequency (n = ", nrow(yes), ")", sep = ""), 
+         y = paste("Activity (n = ",   length(na.omit(unique(yes$Activity))), ")", sep="")) +
+    geom_text(stat='count', aes(label=..count..), hjust = -0.5, size = 2.5) +
+    my_theme
+  ggsave("./plots/explore/bar_actfreq.png", width = 8, height = 4)
+  
+  b <- basemap +
+    geom_sf(data = spdat, aes(color = Activity), size = 0.7) +
+    scale_color_brewer(palette = "Set3", name ="") +
+    map_theme
+  ggsave("./plots/explore/sp_actfreq.png", width = 8, height = 4)
+  
+  print(a)
+  print(b)
+  
+} else if (portrait == TRUE) {
+  a <- yes %>%
+    ggplot(aes(y = fct_rev(fct_infreq(Activity)))) +
+    geom_bar(stat="count", fill = col1) +
+    labs(x = paste("Frequency (n = ", nrow(yes), ")", sep = ""), 
+         y = paste("Activity (n = ",   length(na.omit(unique(yes$Activity))), ")", sep="")) +
+    geom_text(stat='count', aes(label=..count..), hjust = -0.5, size = 2.5) +
+    my_theme
+  ggsave("./plots/explore/bar_actfreq.png", width = 8, height = 4)
+  
+  b <- basemap +
+    geom_sf(data = spdat, aes(color = Activity), size = 0.7) +
+    scale_color_brewer(palette = "Set3", name ="") +
+    map_theme
+  ggsave("./plots/explore/sp_actfreq.png", width = 8, height = 4)
+  
+  a + b
+  ggsave("./plots/explore/bar_sp_acttype.png", width = 8, height = 4)
+  print(a + b)
+}
+```
+
+
+```{r ex_heading, eval = extractive}
+asis_output("## Extractive use\n***") # header
+```
+
+
+```{r bar_exb, eval = eval_exb}
+# text
+asis_output("### Boat based {.tabset}\n")
+asis_output("#### Fishing type\n")
+
+# plot
+exb %>%
+ ggplot(aes(x = fct_infreq(FishingType))) +
+  geom_bar(stat='count', position = position_dodge2(reverse = TRUE), fill = col1) +
+  labs(x = paste("Fishing Type (n = ", length(na.omit(unique(exb$FishingType))), ")", sep=""), y = paste("Frequency (n = ", nrow(exb), ")", sep = "")) +
+  geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ggsave("./plots/explore/bar_exb.png", width = 8, height = 4)
+```
+
+
+```{r sp_exb, eval = eval_exb}
+# text
+asis_output("#### Spatial distribution and kernel density\n")
+
+# sf of boat based fishing for kernel density plot - keep lat/long independent of geometry
+sp_exb <- exb %>% st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283) %>% 
+  mutate(UseLong = sf::st_coordinates(.)[,1], UseLat = sf::st_coordinates(.)[,2])
+
+# plot
+if (landscape == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_exb, aes(colour = FishingType), size = 0.5) +
+    scale_color_brewer(palette = "Set3") +
+    labs(color='Boat based fishing') +
+    map_theme
+  ggsave("./plots/explore/sp_exb.png", width = 8, height = 4)
+
+  b <- sp_exb %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) + 
+    map_theme +
+    labs(x = "", y = "")
+  ggsave("./plots/explore/kdens_exb.png", width = 8, height = 4)
+  
+  print(a)
+  print(b)
+} else if (portrait == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_exb, aes(colour = FishingType), size = 0.5) +
+    scale_color_brewer(palette = "Set3") +
+    labs(color='Boat based fishing') +
+    map_theme
+  ggsave("./plots/explore/sp_exb.png", width = 8, height = 4)
+
+  b <- sp_exb %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) + 
+    map_theme +
+    labs(x = "", y = "")
+  ggsave("./plots/explore/kdens_exb.png", width = 8, height = 4)
+  
+  a + b 
+  ggsave("./plots/explore/sp_kdens_exb.png", width = 8, height = 4)
+  print(a + b)
+}
+```
+
+
+```{r bar_exs, eval = eval_exs}
+# text
+asis_output("### Shore based {.tabset}\n")
+asis_output("#### Fishing type\n")
+
+# plot
+exs %>%
+  ggplot(aes(x = fct_infreq(FishingType))) +
+  geom_bar(stat='count', position = position_dodge2(reverse = TRUE), fill = col1) +
+  labs(x = paste("Fishing Type (n = ", length(na.omit(unique(exs$FishingType))), ")", sep=""), y = paste("Frequency (n = ", nrow(exs), ")", sep = "")) +
+  geom_text(stat='count', aes(label=..count..), vjust = -0.5, size = 2.5) +
+  my_theme
+ggsave("./plots/explore/bar_exs.png", width = 8, height = 4)
+```
+
+
+```{r sp_exs, eval = eval_exs}
+# text
+asis_output("#### Spatial distribution and kernel density\n")
+
+# sf of boat based fishing for kernel density plot - keep lat/long independent of geometry
+sp_exs <- st_as_sf(exs, coords = c("UseLong", "UseLat"), crs = 4283) %>% 
+  mutate(UseLong = sf::st_coordinates(.)[,1], UseLat = sf::st_coordinates(.)[,2])
+
+# plot
+if (landscape == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_exs, aes(colour = FishingType), size = 0.5) +
+    scale_color_brewer(palette = "Set3") +
+    labs(color='Boat based fishing') +
+    map_theme
+  ggsave("./plots/explore/sp_exb.png", width = 8, height = 4)
+
+  b <- sp_exs %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) + 
+    map_theme +
+    labs(x = "", y = "")
+  ggsave("./plots/explore/kdens_exb.png", width = 8, height = 4)
+  
+  print(a)
+  print(b)
+} else if (portrait == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_exs, aes(colour = FishingType), size = 0.5) +
+    scale_color_brewer(palette = "Set3") +
+    labs(color='Boat based fishing') +
+    map_theme
+  ggsave("./plots/explore/sp_exb.png", width = 8, height = 4)
+
+  b <- sp_exs %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) + 
+    map_theme +
+    labs(x = "", y = "")
+  ggsave("./plots/explore/kdens_exb.png", width = 8, height = 4)
+  
+  a + b 
+  ggsave("./plots/explore/sp_kdens_exb.png", width = 8, height = 4)
+  print(a + b)
+}
+```
+
+```{r nex_heading, eval = nonextractive}
+asis_output("## Non-extractive use\n***") # header
+```
+
+
+```{r bar_nexb, eval = eval_nexb}
+# text
+asis_output("### Boat based {.tabset}\n")
+asis_output("#### Activity\n")
+
+# plot
+nexb %>%
+  ggplot(aes(y = fct_rev(fct_infreq(Activity)))) +
+  geom_bar(stat="count", fill = col1) +
+  labs(x = paste("Frequency (n = ", nrow(nexb), ")", sep = ""), y = paste("Activity (n =", length(na.omit(unique(nexb$Activity))), ")", sep="")) +
+  geom_text(stat='count', aes(label=..count..), hjust = -0.5, size = 2.5) +
+  my_theme
+ggsave("./plots/explore/bar_nexb.png", width = 8, height = 4)
+```
+
+
+```{r sp_nexb, eval = eval_nexb}
+asis_output("#### Spatial distribution and kernel density\n")
+
+# sf of boat based fishing for kernel density plot - keep lat/long independent of geometry
+sp_nexb <- st_as_sf(nexb, coords = c("UseLong", "UseLat"), crs = 4283) %>% 
+  mutate(UseLong = sf::st_coordinates(.)[,1], UseLat = sf::st_coordinates(.)[,2])
+
+# plot
+if (landscape == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_nexb, aes(color = Activity), size = 1) +
+    scale_color_brewer(palette = "Set3") +
+    map_theme
+  ggsave("./plots/explore/sp_nexb.png", width = 8, height = 4)
+  
+  b <- sp_nexb %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), 
+                    geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    my_theme + theme(axis.text.x = element_text(angle = 90))
+  ggsave("./plots/explore/kdens_nexb.png", width = 8, height = 4)
+  
+  print(a)
+  print(b)
+} else if (portrait == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_nexb, aes(color = Activity), size = 1) +
+    scale_color_brewer(palette = "Set3") +
+    map_theme
+  ggsave("./plots/explore/sp_nexb.png", width = 8, height = 4)
+  
+  b <- sp_nexb %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), 
+                    geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    my_theme + theme(axis.text.x = element_text(angle = 90))
+  ggsave("./plots/explore/kdens_nexb.png", width = 8, height = 4)
+  
+  a + b 
+  ggsave("./plots/explore/sp_kdens_nexb.png", width = 8, height = 4)
+  print(a + b)
+}
+```
+
+
+```{r bar_nexs, eval = eval_nexs}
+# text
+asis_output("### Shore based {.tabset}\n")
+asis_output("#### Activity\n")
+
+# plot
+nexs %>%
+  ggplot(aes(y = fct_rev(fct_infreq(Activity)))) +
+  geom_bar(stat="count", fill = col1) +
+  labs(x = paste("Frequency (n = ", nrow(nexs), ")", sep = ""), 
+       y = paste("Activity (n =", length(na.omit(unique(nexs$Activity))), ")", sep="")) +
+  geom_text(stat='count', aes(label=..count..), hjust = -0.5, size = 2.5) +
+  my_theme
+ggsave("./plots/explore/bar_nexs.png", width = 8, height = 4)
+```
+
+
+```{r sp_nexs, eval = eval_nexs}
+asis_output("#### Spatial distribution and kernel density\n")
+
+# sf of boat based fishing for kernel density plot - keep lat/long independent of geometry
+sp_nexs <- st_as_sf(nexs, coords = c("UseLong", "UseLat"), crs = 4283) %>%
+  mutate(UseLong = sf::st_coordinates(.)[,1], UseLat = sf::st_coordinates(.)[,2])
+
+# plot
+if (landscape == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_nexs, aes(color = Activity), size = 1) +
+    scale_color_brewer(palette = "Set3") +
+    map_theme
+  ggsave("./plots/explore/sp_nexs.png", width = 8, height = 4)
+  
+  b <- nexs %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), 
+                    geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme
+  ggsave("./plots/explore/kdens_nexs.png", width = 8, height = 4)
+  
+  print(a)
+  print(b)
+} else if (portrait == TRUE) {
+  a <- basemap +
+    geom_sf(data = sp_nexs, aes(color = Activity), size = 1) +
+    scale_color_brewer(palette = "Set3") +
+    map_theme
+  ggsave("./plots/explore/sp_nexs.png", width = 8, height = 4)
+  
+  b <- nexs %>%
+    ggplot() +
+    stat_density_2d(aes(x = UseLong, y = UseLat, fill = stat(level), alpha = ..level..), 
+                    geom = "polygon", bins = 10) +
+    scale_fill_distiller(palette = "YlGnBu", direction = -1, name = "Kernal\nDensity") +
+    scale_alpha(guide = 'none') +
+    geom_sf(data = coast, lwd = 0.07) +
+    map_theme
+  ggsave("./plots/explore/kdens_nexs.png", width = 8, height = 4)
+  
+  a + b 
+  ggsave("./plots/explore/sp_kdens_nexs.png", width = 8, height = 4)
+  print(a + b)
+}
+```

@@ -1,0 +1,328 @@
+# Set Up
+```{r setup, include = FALSE}
+# librarys
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(chron)
+library(lunar)
+library(ggplot2)
+
+# functions
+source("./functions/cleaningFunc.R") # spatial functions
+
+# data
+dat <- read_csv("./data/RAW/RAW.csv")
+```
+
+## Rename
+Rename questions to make them R friendly
+```{r select and filter}
+dat  <- dat %>% 
+dplyr::rename(FieldTrip = "Trip.number",
+               Interviewer = "REQUIRED..Interviewer",
+               BR = "REQUIRED..Boat.ramp.transect.name",
+               Screen18 = "SCREEN..18.",
+               PrevInter = "SCREEN..have.we.interviewed.you.in.the.last.2.weeks.", 
+               Agreement = "REQUIRED..Agreement.to.Participate",
+               nDaysInArea = "How.many.days.are.you.in.the.area.",
+               nDaysInArea_other = "If.OTHER....days.in.area",
+               BoatAccess = "Do.you.have.access.to.a.motorised.boat.while.you.re.here.",
+               nBoatDays = "If.YES....days.you.intend.to.spend.on.boat.",
+               nBoatDays_other = "If.OTHER....days.on.private.boat.",
+               nShoreDays = "X..days.you.intend.to.be.engaged.in.shore.based.activities.",
+               nShoreDays_other = "If.OTHER....days.on.shore.",
+               nTimesLast12m = "X..separate.times.in.area.in.last.12.months.",
+               nTimesLast12m_other = "If.OTHER....times.in.last.12.months",
+               nTimes19 = "X..separate.times.in.area.in.2019.",
+               nTimes19_other = "If.OTHER....times.in.area.in.2019",
+               Covid = "Would.you.be.elsewhere.if.it.weren.t.for.travel.restrictions.",
+               SurveyLong = "x.x",
+               SurveyLat = "y.x",
+               EXTRACTIVE = "EXTRACTIVE.SURVEY",
+               exRecall = "If.RECALL..date",
+               FishingType = "What.type.of.fishing.did.you.do.at.this.site.",
+               FishingType_other = "If.OTHER..fishing.type",
+               BaitLure = "Did.you.use.a.bait.or.lure.",
+               exStart = "What.time.did.you..if.spearfishing...your.lines.get.in.the.water.",
+               exStop = "What.time.did.you..if.spearfishing..your.lines.get.out.the.water..",
+               MaxHook = "Max.depth.of.hook.at.this.site..m..",
+               KeptUndam = "X..fish.you.kept.undamaged.at.this.site.",
+               KeptUndam_other = "If.OTHER....kept.undamaged",
+               RelUndam = "X..released.undamaged.at.this.site.",
+               RelUndam_other = "If.OTHER....released.undamaged",
+               nDP = "X..depredated",
+               nDP_other = "If.OTHER....depredated",
+               Species = "What.species.did.you.catch.", 
+               exWhyLeave = "Why.did.you.leave.this.site.",
+               exWhyLeave_other = "If.OTHER..why.did.you.leave.this.site.",
+               NONEXTRACTIVE = "NON_EXTRACTIVE.SURVEY",
+               nexRecall = "If.RECALL..date.1",
+               Activity = "What.activity.did.you.do.",
+               Activity_other = "If.OTHER..activity",
+               nexStart = "What.time.did.you.start.the.activity.",
+               nexStop = "What.time.did.you.end.the.activity.",
+               DiveMaxDepth = "If.DIVING..max.depth.",
+               WhyChoose = "Why.did.you.choose.this.site.",
+               WhyChoose_other = "If.OTHER..why.this.site",
+               nexWhyLeave = "Why.did.you.leave.this.site..1",
+               nexWhyLeave_other = "If.OTHER..why.did.you.leave.this.site..1",
+               UseLong = "x.y",
+               UseLat = "y.y",
+               exTimes12m = "X..times.fished.in.last.12.months.",
+               nexTimes12m = "X..times.doing.NEX.last.12.months..",
+               exYrs = "X..years.fishing.",
+               nexYrs = "X..years.doing.NEX.", 
+               DiveCert = "Are.you.a.diver..If.so..what.is.your.certification.",
+               nDives = "If.DIVING....dives.",
+               YrBorn = "What.year.were.you.born.",
+               Postcode = "Home.postcode",
+               Accom = "If.VISITOR..where.are.you.staying.",
+               Accom_other = "If.OTHER..where.are.you.staying",
+               Sex = "Male.or.Female",
+               Party = "Describe.party", 
+               BoatLength = "Boat.length",
+               BoatType = "Boat.Type",
+               BoatID = "Boat.name.or.number",
+               jDate = "Date",
+               jBR = "Boat.ramp",
+               BRLat = "Boat.ramp.lat",
+               BRLong = "Boat.ramp.long",
+               nBoatsFishThatDay = "No..boats.fishing.that.day", 
+               jUseLat = "Lat",
+               jUseLong = "Long",
+               CaughtUndam = "No..fish.caught.undamaged",
+               jnDP = "No..fish.lost.to.sharks",
+               nHooked = "Total.fish.hooked",
+               jexStart = "Time.lines.in",
+               jexStop = "Time.lines.out",
+               jFishingType = "Fishing.method",
+               jBaitLure = "Bait.type",
+               jMaxHook = "Max.hook..depth",
+               jBoatID = "Boat.name.number",
+               jBoatLength = "Boat.Length",
+               jTime = "Time.of..interview",
+               nTimesFished = "How_many_times_have_you_fished_",
+               jexYrs = "How_many_years_have_you_been_fi", 
+               jDaysBoatFished = "How_many_days_have_you_boat._fished_f",
+               jDaysBoatFishedCat = "How.many.days.have.you.boat.fished.in.the.last.year.categorical..1...0.25..2...26.50..3...51...75..4...76...100..5.",
+               jBRAvid = "How.many.times.fished.from.this.boat.ramp.categorical..1...0.25.times..2...26.50..3...51.75..4...76.100..5.....100.",
+               jPrevInter = "Have_you_been_interviewed_about",
+               FINISH = "FINISH.SURVEY....Comments",
+               PersonID = mObjID,
+              SiteType = Site.Type,
+              nMales = "Number.of.Males",
+              nFemales = "Number.of.Females",
+              nBoys = "Number.of.boys",
+              nGirls = "Number.of.girls") %>% 
+  filter(is.na(BR) | BR != "BeadonCreek")  # Getting rid of Onslow data
+```
+
+## Temporal variables
+  - The date column is automated so there should be no NA's unless the agreement is no. 
+  - Adhere start and stop times for extractive and non-extractive activities into one column,
+    there should only be blanks where agreement is no. 
+  - Due to recall trips need to make a trip date column which may be different to survey date.
+  - Any data out with field trip dates is a dummy/test survey
+  
+## Temporal variables
+The date/time survey was conducted.
+```{r Date and Time}
+
+dat2 <- dat %>%
+  # getting date from creation date/apending jons and formatting
+  dplyr::mutate(DateTime = ifelse(is.na(nDate), CreationDate.x, nDate)) %>% 
+  dplyr::mutate(DateTime = parse_date_time(DateTime, c("mdY IMS p")))  # making POSIX
+  dplyr::mutate(Date = as.Date(ifelse(!is.na(DateTime), as.character(as.Date(substr(DateTime, 1, 10), "%Y-%m-%d")),
+                              as.character(as.Date(jDate, "%d/%m/%Y"))), "%Y-%m-%d")) %>% 
+  #  check to see whether you can make this work with the avidity stuff without jankying up the ids but probably not so will have to redo the ids for avidity after you have added this line in 
+  # dplyr::mutate(Date = as.Date(ifelse(is.na(Date), as.character(as.Date(substr(CreationDate.x, 1, 10), "%Y-%m-%d")),
+  #                             as.character(as.Date(Date, "%d/%m/%Y"))), "%Y-%m-%d")) %>% 
+  dplyr::mutate(Date = as.Date(ifelse(str_detect(Date, "2020-09-01"), as.character(as.Date(Date + difftime("2020-10-01",
+                                                                                                           "2020-09-01"))),
+                        as.character(as.Date(Date))), "%Y-%m-%d")) %>% # This was input one month to early
+  # calc year
+  dplyr::mutate(numYear = as.numeric(substr(Date, 1, 4))) %>% # substr take between the 1sta nd 4th digit in date column
+  dplyr::mutate(facYear = as.factor(numYear)) %>% # Doing this after filter so 2018 is not a level
+  dplyr::mutate(DateTime = with_tz(DateTime, "Australia/Perth")) %>% # changing timezone
+  dplyr::mutate(Time = ifelse(!is.na(DateTime), as.character(substr(DateTime, 12, 16)), as.character(jTime))) %>%
+  dplyr::relocate(Date, numYear, facYear, Time, .after = PersonID) %>%
+  dplyr::select(-c(nDate, CreationDate.x, jDate, jTime, DateTime)) %>%
+  dplyr::mutate(Date = as.Date(Date))
+
+# These following observations have no dae but also no other information including mGlob ID when i go back wondering if something happened during join investigate later - for now these blank observations have been filtered. 
+# a <- which(is.na(dat2$DateTime))
+# dat2[a,]
+```
+
+
+## IDs
+  -TripNum: all activities on one boat launch (individual date) are collectively a trip, only       applicable is data from recalled trips was collected (if TripNum >1 then binRecall should        equal 1). TripNum is chronological. 
+  -SiteNum: the chronological order a site was visited within one trip
+  
+  * Mutate Person ID to reflect that people with same boat ID should have the same associated person ID. 
+
+```{r IDs}
+dat <- dat %>%
+  group_by(PersonID) %>%
+  arrange(Start) %>% 
+  mutate(TripNum = as.numeric(as.factor(TripDate))) %>% # number trips done by same person across different days
+  mutate(SiteNum = sequence(rle(TripNum)$lengths)) %>% # chronological order of which a participant has conducted uses in a single trip
+  arrange(ID) %>%
+  dplyr::ungroup()
+
+# survey ID: is the ID of an individual survey
+# person ID: the id of a person via there boat number
+# trip id: an id per individual day trip per person 
+
+dat <- dat %>% 
+  mutate(BoatID = toupper(BoatID)) %>% 
+  group_by(BoatID) %>% 
+  mutate(PersonID = ifelse(anyDuplicated(BoatID) & !is.na(BoatID), min(PersonID), PersonID)) %>% 
+  ungroup() %>% 
+  group_by(PersonID, TripDate) %>% 
+  mutate(TripID = cur_group_id()) %>% 
+  ungroup()
+```
+
+## Meta cleaning
+```{r meta}
+dat <- dat %>% 
+  mutate(nBoatDays = as.numeric(ifelse(nBoatDays %in% "All", nBoatDays, nBoatDays))) %>% 
+  mutate(nShoreDays = as.numeric(ifelse(nShoreDays %in% "All", nDaysInArea, nShoreDays))) %>% 
+  mutate_each_(~factor(.), c("Interviewer", "Screen18", "PrevInter", "Agreement",
+                                  "BoatAccess", "Resident", "facYear"))
+```
+
+## Use cleaning
+```{r use surveys}
+dat <- dat %>% 
+  mutate(SiteType = as.factor(ifelse(!is.na(exSiteType), exSiteType, nexSiteType))) %>% 
+  mutate(ActivityType = as.factor(ifelse(!is.na(exActivityType), exActivityType, nexActivityType))) %>% 
+  mutate(WhyLeave = as.factor(ifelse(!is.na(exWhyLeave), exWhyLeave, nexWhyLeave))) %>% 
+  mutate(Detract = as.factor(ifelse(!is.na(exDetract), exDetract, nexDetract))) %>% 
+  mutate(UseLat = ifelse(!is.na(exLat), exLat, nexLat)) %>% 
+  mutate(UseLong = ifelse(!is.na(exLong), exLong, nexLong)) %>% 
+  mutate(Activity = as.factor(ifelse(ActivityType == "Extractive", "Fishing", Activity))) %>% 
+  mutate(MaxHook = ifelse(FishingType %in% "Trolling", 0, MaxHook)) %>% 
+  mutate_each_(funs(factor(.)), c("FishingType", "WhyChoose", "BaitLure", "Site")) %>% 
+  mutate(Comments = paste(exComments, nexComments, aComments, sep = "|"))
+```
+
+### Catch data
+```{r Catch data}
+dat <- dat %>%
+  mutate(CaughtUndam = as.numeric(RelUndam + KeptUndam)) %>% 
+  mutate(nHooked = as.numeric(CaughtUndam + nDP)) %>% 
+  mutate(binDP = ifelse(nDP > 0, "1","0")) %>% 
+  mutate(binDP = as.factor(binDP)) %>% 
+  mutate(perDP = ifelse(nHooked %in% "0", 0, as.numeric(round((nDP/nHooked)*100, 2)))) %>% 
+  mutate(proDP = as.numeric(round(perDP/100, 2))) %>% 
+  mutate(nUndamHr = as.numeric(round(CaughtUndam/decDuration, 2))) %>% 
+  mutate(nDPHr = as.numeric(round(nDP/decDuration, 2))) %>% 
+  mutate(nHookedHr = as.numeric(round(nHooked/decDuration, 2))) %>% 
+  mutate(DPrateHr = as.numeric(round(nDPHr/nHookedHr, 2))) %>% 
+  mutate(DPrateHr = ifelse(is.nan(DPrateHr), 0, DPrateHr))
+```
+
+### Species Caught
+```{r Species}
+# 
+# # Species Caught
+# # Mostly done, just some issues with general fish species e.g. bream - could actually be a bream but could also be a common name for a snapper or a emperor
+# Ning <- Ning %>%
+#   mutate(Emperors = ifelse(str_detect(Species, "blue lined|blue line|black snapper|spangled|Spangled|spango|Spango|Spangley|spangley|spangly|Grassy|red spot|Long nose|Long tongs|REd emp|Red emperor|Red lipped
+#                                       |Blue lined emp|Blue lines emp|Emperors|Emporer|slang emperor"), 1, NA)) %>%
+#   mutate(Cods_Trouts_Groupers = ifelse(str_detect(Species, "estuarine cod|Charlie|charlie|rock cod|rockcod|sweetlips|coral|Coral|honeycomb|Honeycomb|honey|Honey|rankin|Coronation|coronation|nanny|Chinaman|chinamen|chinaman
+#                                                   |cod|Cod|Cud’s"), 1, NA)) %>%
+#   mutate(Snappers = ifelse(str_detect(Species, "Rims on|Red throat|Flag|flags|Ruby|Goldband|goldband|Goldban|Gold band||Golden band|gold and|Mangrove|mangrove|Jack|jack|Red snapper|Spainish|Striped sea|stripey sera"), 1, NA)) %>%
+#   mutate(Breams = ifelse(str_detect(Species, "Robinson's|seabream|Seabream|Pink bream|thredfin|threadfin"), 1, NA)) %>%
+#   mutate(Perch = ifelse(str_detect(Species, "Pearl perch|Dhufish|dhufosh"), 1, NA)) %>%
+#   mutate(Pelagic = ifelse(str_detect(Species, "black marlin|sailfish|Marlin|barracude|trevally|Trevally|trivali|trevallu|Cobia|Kobe|Obie|queenie|Queenie|queen|tuna|Yellowfin|mackerel|Mackerel|mackrel|Mackeral|mac,real|Mackey
+#                                      |Mahi|bludger|Wahoo|Waco"), 1, NA)) %>%
+#   mutate(Flatheads_Cobblers = ifelse(str_detect(Species, "Cobbler|Flathead|Flatty|catfish|Northern flathead|Sandbar flathead"), 1, NA)) %>%
+#   mutate(Pigfish_Tuskfish_Parrotfish = ifelse(str_detect(Species, "blue bone|black spot|parrot|vine"), 1, NA)) %>%
+#   mutate(Cephalopods_Crustaceans = ifelse(str_detect(Species, "Squid|squid|Squids|squids|Prawn|prawn|Prawns|prawns"), 1, NA)) %>%
+#   mutate(Others = ifelse(str_detect(Species, "Blowfish|Blowly|northwest|Damsel|Leather jacket|Lizard fish|Shark|Whalers"), 1, NA)) %>%
+#   relocate(Emperors, .after=Species) %>%
+#   relocate(Snappers, .after=Emperors) %>%
+#   relocate(Breams, .after=Snappers) %>%
+#   relocate(Cods_Trouts_Groupers, .after=Breams) %>%
+#   relocate(Perch, .after=Cods_Trouts_Groupers) %>%
+#   relocate(Pelagic, .after=Perch) %>%
+#   relocate(Flatheads_Cobblers, .after=Pelagic) %>%
+#   relocate(Pigfish_Tuskfish_Parrotfish, .after=Flatheads_Cobblers) %>%
+#   relocate(Cephalopods_Crustaceans, .after=Pigfish_Tuskfish_Parrotfish) %>%
+#   relocate(Others, .after=Cephalopods_Crustaceans)
+# 
+# unique(dat$Species)
+```
+
+
+## Avidity and demographics cleaning
+```{r avidity clean}
+dat <- dat %>% 
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 0, 4), "0-4", NA)) %>% 
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 5, 9), "5-9", bin_exTimes12m)) %>%
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 10, 14), "10-14", bin_exTimes12m)) %>%
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 15, 19), "15-19", bin_exTimes12m)) %>%
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 20, 29), "20-29", bin_exTimes12m)) %>%
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 30, 39), "30-39", bin_exTimes12m)) %>%
+  mutate(bin_exTimes12m = ifelse(between(exTimes12m, 40, 59), "40-59", bin_exTimes12m)) %>%
+  mutate(bin_exTimes12m = ifelse(exTimes12m > 59, "60+", bin_exTimes12m)) 
+# Age 
+dat <- dat %>% 
+  mutate(Age = 2021 - YrBorn) %>% 
+  mutate(binAge = ifelse(between(Age, 18, 25), "18-24", NA)) %>% 
+  mutate(binAge = ifelse(between(Age, 25, 34), "25-34", binAge)) %>%
+  mutate(binAge = ifelse(between(Age, 35, 44), "35-44", binAge)) %>%
+  mutate(binAge = ifelse(between(Age, 45, 54), "45-54", binAge)) %>%
+  mutate(binAge = ifelse(between(Age, 55, 64), "55-64", binAge)) %>%
+  mutate(binAge = ifelse(between(Age, 65, 74), "65-74", binAge)) %>%
+  mutate(binAge = ifelse(Age > 74, "75+", binAge))
+
+# Postcode
+# dat <- dat %>% 
+#   mutate(Postcode = as.factor(ifelse(Resident == "Yes", "6450", Postcode))) %>% 
+#   mutate(Postcode = as.factor(ifelse(Postcode == " 0", NA, Postcode))) 
+
+# Party
+dat <- dat %>% 
+  mutate(Sex = as.factor(Sex)) %>% 
+  mutate(nFemales = ifelse(is.na(nFemales), 0, nFemales)) %>%
+  mutate(nMales = ifelse(is.na(nMales), 0, nMales)) %>%
+  mutate(nGirls = ifelse(is.na(nGirls), 0, nGirls)) %>%
+  mutate(nBoys = ifelse(is.na(nBoys), 0, nBoys)) %>%
+  mutate(nFemales = ifelse(Sex %in% "Female", nFemales + 1, nFemales)) %>%
+  mutate(nMales = ifelse(Sex %in% "Male", nMales + 1, nMales)) %>% 
+  mutate(nAdults = nFemales + nMales) %>% 
+  mutate(nChild = nGirls + nBoys) %>% 
+  mutate(PartySize = nAdults + nChild) %>% 
+  mutate_each_(funs(factor(.)), c("Accom", "DiveCert")) %>% 
+  mutate(kids = ifelse(nChild > 0, 1, 0))
+```
+
+## Lunar Phase
+```{r lunar phase}
+dat <- dat %>%
+  mutate(LunarPhase = as.factor(lunar.phase(TripDate, name = TRUE)))
+```
+
+```{r}
+dat <- dat %>% 
+  dplyr::select(
+    ID, TripID, SurveyDate, numYear, facYear, Interviewer, mLat, mLong, PersonID, Screen18,
+         PrevInter, Agreement, binRecall, TripDate, TripMonth, TripJulianDay, TripNum, SiteNum,
+         Site, SiteType, Resident, BoatAccess, nDaysInArea, nBoatDays, nShoreDays, nTimesLast12m,
+         UseLat, UseLong, ActivityType, Activity, Start, Stop, MedianTime, decMedianTime,
+         decDuration, FishingType, BaitLure, MaxHook, KeptUndam, RelUndam, nDP, CaughtUndam,
+         nHooked, binDP, perDP, proDP, CaughtUndam, nHooked, nUndamHr, nDPHr, DPrateHr, Species,
+         DiveMaxDepth, WhyChoose, WhyLeave, Detract, exTimes12m, bin_exTimes12m, exYrs, nexTimes12m, nexYrs,
+         DiveCert, nDives, Age, binAge, Postcode, Accom, Sex, nFemales, nMales, nGirls, nBoys, nAdults,
+         nChild, kids, PartySize, BoatLength, BoatID, Comments, LunarPhase)
+```
+
+# Check point
+```{r csv}
+write.csv(dat, "./data/01_data/1.1_dat.csv", row.names = FALSE) # Fully cleaned data
+```
