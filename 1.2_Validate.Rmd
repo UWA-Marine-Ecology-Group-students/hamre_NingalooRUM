@@ -17,7 +17,7 @@ source("./functions/cleaningFunc.R") # spatial functions
 dat <- read_csv("./data/01_data/1.1_dat.csv")
 
 # spatial data
-coast <- st_read("./data/gpkg/Coast_4283.gpkg")
+coast <- st_read("./data/gpkg/NingalooCoast.gpkg") %>% st_transform(crs = 4283)
 ```
 
 # Remove points on land
@@ -26,11 +26,11 @@ spdat <- dat %>%
   filter(!is.na(UseLat), !is.na(UseLong)) %>% 
   st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
 
-# remove those on land
+# remove those on land, if you have sitestypes with na this will remove them too
 dat <- spdat %>% 
-  mutate(Location = ifelse(st_intersects(spdat, coast), "Land")) %>% 
+  mutate(Location = ifelse(st_intersects(spdat, coast), "Land", NA)) %>% 
   mutate(Location = ifelse(is.na(Location), "Water", Location)) %>% 
-  filter(Location %in% "Water") %>% 
+  filter(Location %in% "Water" & SiteType %in% "Boat" | SiteType %in% "Shore") %>% 
   mutate(UseLong = sf::st_coordinates(.)[,1],
          UseLat = sf::st_coordinates(.)[,2]) %>% 
   st_drop_geometry() %>% 

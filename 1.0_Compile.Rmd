@@ -90,13 +90,19 @@ However, looking at number of observations in dfs, there will not be the same nu
 Test all joins and see which one is right
 ```{r  join}
 MetaUse <- full_join(meta, use, by = c("mGlobID" = "uGUID"), keep = T) # joining meta and use
-Ning0921 <- full_join(MetaUse, avidity, by = c("uGlobID" = "aGUID"), keep = T) %>% #joining metause with avidity
+dat0921 <- full_join(MetaUse, avidity, by = c("uGlobID" = "aGUID"), keep = T) %>% #joining metause with avidity
   rename(nDate = Date)
 
-Ning <- bind_rows(Ning0921, jon) # adding in jons data
+dat <- bind_rows(dat0921, jon) # adding in jons data
+```
+
+
+```{r}
+dat <- dat %>% 
+  mutate(nDate = parse_date_time(nDate, c("mdY IMS p")))  # making POSIX
 ```
 
 ```{r csv}
-write.csv(Ning0921, 'data/RAW/Data-250921/Ning0921.csv') # My up to date unleaned data
-write.csv(Ning, 'data/RAW/RAW.csv') # full raw uncleaned dataset including Jon's data.
+write.csv(dat0921, 'data/RAW/Data-250921/Ning0921.csv') # My up to date unleaned data
+write.csv(dat, 'data/RAW/RAW.csv') # full raw uncleaned dataset including Jon's data.
 ```
