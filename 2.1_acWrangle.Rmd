@@ -2,324 +2,344 @@
 
 ## Set up
 ```{r setup}
-# knitr options
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width = 10, fig.height = 7) 
-
-# libraries 
-library(tidyverse)
-library(dplyr)
-library(ggplot2)
-library(sp)
-library(raster)
-library(rgeos)
-library(rgdal)
-library(sf)
-library(lwgeom)
-library(googledrive)
-library(units)
-library(nngeo)
-library(magrittr)
-library(todor)
-library(smoothr)
-
-# data
-BR <- st_read("./data/gpkg/NingBR.gpkg") # boat ramps
-BRtrips <- read.csv("./data/RAW/Trips_Ramp_out.csv") 
-ntz <- st_read("./data/gpkg/ntz.gpkg") # current sz, state and commonwealth
-grid_base <- st_read("./data/gpkg/mar_acBase.gpkg") # grid base
-dat <- read_csv("data/01_data/1.2_dat.csv") # data
-
-# functions
-source("./functions/spatialFunc.R") # spatial functions
-source("./functions/ascFunc.R")
-source("./functions/theme.R")
-
-sf_use_s2(FALSE)
+    # knitr options
+    knitr::opts_chunk$set(warning = FALSE, message = TRUE, echo = FALSE, fig.align =
+                            'center', fig.width = 10, fig.height = 7) 
+    
+    # libraries 
+    library(tidyverse)
+    library(dplyr)
+    library(ggplot2)
+    library(sp)
+    library(raster)
+    library(rgeos)
+    library(rgdal)
+    library(sf)
+    library(lwgeom)
+    library(googledrive)
+    library(units)
+    library(nngeo)
+    library(magrittr)
+    library(todor)
+    library(smoothr)
+    
+    # data
+    # BR <- st_read("./data/shp/natBR.shp") # boat ramps
+    BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% # from BRtrips.R
+      st_transform(crs = 4283)
+    
+    npz <- st_read("./data/gpkg/ntz.gpkg") %>% 
+      st_transform(crs = 4283)
+    
+    grid_base <- st_read("./data/gpkg/ascBase_v2.gpkg") %>% 
+      st_transform(crs = 4283)
+    
+    dat <- read_csv("data/01_data/1.2_dat.csv")
+    
+    # mp <- st_read("./data/gpkg/pmmp_4326.gpkg") %>% 
+    #   st_transform(crs = 4283)
+    
+    coast <- st_read("./data/gpkg/coast.gpkg") %>% 
+      st_transform(crs = 4283)
+    
+    # simulation
+    sim_name <- "sim1"       #'[#NOTE: check simulation name]  
+    
+    sim <- st_read(paste0("./data/gpkg/sims/asc_", sim_name, ".gpkg")) %>% 
+      st_transform(crs = 4283)
+    
+    # functions
+    source("./functions/spatialFunc.R") # spatial functions
+    source("./functions/ascFunc.R") # function to make asc grid
+    source("./functions/theme.R") # plot theme
+    
+    sf_use_s2(FALSE)
 ```
 
-```{r}
-BRtrips <- read.csv("./data/02_data/Trips_Ramp_out.csv") %>% 
-  filter(State_reg == "WA" & Name_reg == "West Coast") # filter to state and region
-
-# check ramps names
-# unique(BRtrips$Ramp_name)
-
-BRtrips <- BRtrips %>% 
-  filter(Ramp_name %in% c("Hillarys Marina", "Mindarie Marina", "Ocean Reef Marina", "Two Rocks Marina")) %>% 
-  dplyr::select(Ramp_name, RampID, Month, TRIPS_ramp_prop_Grvt__5, upp_TRIPS_Grvt__5, low_TRIPS_Grvt__5) %>% 
-  group_by(RampID, Ramp_name) %>%
-  summarize(across(where(is.numeric), list(sum), .names = "{.col}")) %>% # summing across months to get annual estimates
-  mutate(RampID = as.numeric(RampID))
-
-BRtrips <- left_join(BRtrips, BR, by = c("RampID")) %>% # join to geometry
-  st_as_sf()
-
-write_csv(BRtrips, "./data/02_data/2.1_BRtrips.csv")
-saveRDS(BRtrips, "./data/gpkg/2.1_BRtrips.gpkg")
-```
-
-## Simulation
-```{r}
-# sim_name <- "simog_split"
-# sim <- st_read("./data/gpkg/simog_split.gpkg")
-
-# sim_name <- "sim1_split"
-# sim <- st_read("./data/gpkg/sim1_split.gpkg")
-
-# sim_name <- "sim2_split"
-# sim <- st_read("./data/gpkg/sim2_split.gpkg")
-
-# sim_name <- "sim3_split"
-# sim <- st_read("./data/gpkg/sim3_split.gpkg")
-
-sim_name <- "sim4_split"
-sim <- st_read("./data/gpkg/sim4_split.gpkg")
-
-# sim %<>% mutate(id = row_number())
-# 
-# sim %<>% filter(id == 9)
-# ggplot()+
-#   geom_sf(data = sim, aes(fill = as.factor(id)))
-```
 ## Data prep
+
 All data filters have to be done before making the choice set.
+
 ```{r}
-dat %<>% 
-  filter(ActivityType == "Extractive") %>% # filtering activity
-  filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
-  st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)  ## make sf object
+    dat %<>% 
+  #'[#NOTE check all filters have been applied to data eg. activity type, site type and site]
+  
+      filter(ActivityType == "Extractive" & SiteType == "Boat" & str_detect(Site, 'BR')) %>% # filtering activity
+      filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
+      st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)  ## make sf object
+      
+    # need one trip per row (longest site visited on trip)
+    dat %<>% 
+      group_by(PersonID, TripID) %>% 
+      slice(which.max(decDuration)) %>% 
+      ungroup() 
+      
+      dat <- st_crop(dat, grid_base) # removing outliers 
+    
+      #'[#VALIDATE: TRUE, no duplicated trip IDs)]
+      identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
+```
+
+## ASC grid and simulation stats
+
+Creates smallest ASC grid possible within the base grid, given the distribution of data. Each cell must have at least 1 data point in it. 
+Calculates basic stats for simulation and current marine park (eg. area, beach access etc.)
+
+```{r message = FALSE}
+# asc grid
+    grid <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03,
+                    by = 0.02, crs = 4283, vert = FALSE) 
+
+#  ascGrid for QGIS (geom, ID)
+    st_write(grid,
+             paste0("./data/gpkg/sims/2.1_ascGridQ_edit", sim_name, "_4283.gpkg"),
+             append = FALSE) # need to write with st_write to open in QGISRUMs
+
+grid <- st_read("./data/gpkg/ascBase_v2_edit.gpkg") %>% 
+      st_transform(crs = 4283)
   
 
-dat %<>% st_crop(dat, grid_base) # removing outliers
+# sim_stats
+    # sim_stats <- sim_stats(ascGrid = grid, point = dat, mp = mp, coast = coast, crs = 4283, sim_name = sim_name, path = "./plots/ASC RUM", width = 8, height = 11)
+    # sim_stats
+    
+# mp_stats
+    # mp_name <- "marmion"
+    # mp_old <- st_read("./data/gpkg/mar_oldextent.gpkg") %>% st_transform(crs = 4283)
+    # mp_stats <- mp_stats(ascGrid = grid, point = dat, mp = mp_old, coast = coast, crs = 4283, mp_name = "marmion", path = "./plots/ASC RUM", width = 8, height = 11)
+    # write_csv(mp_stats, paste0("./plots/ASC RUM/", mp_name,"_stats.csv"))
+    
+    #'[#TODO: add this validation plot to ascgrid function, maybe make extra function to remove those zones from model? add warning if there is no data in grid cell]  
+    
+    grid$empty <- ifelse(grid$data_present == 0 & grid$sz == 0, 1, 0)# shows row number/gridID_alt of cell missing dat
+    
+    ggplot()+
+      geom_sf(data = grid, aes(fill = as.factor(grid$empty))) # check which one it is
+    
+     # grid <- grid %>% filter(gridID_alt != 25) # remove
+    
 
-# need one trip per row (longest site visited on trip)
-dat %<>% 
-  group_by(PersonID, TripID) %>% 
-  slice(which.max(decDuration)) %>% 
-  ungroup()
+    empty <- grid %>% filter(empty == 1) # binary emppty col
+    
+    empty_int <- st_intersects(empty, grid) # 
+    
+    st_rook = function(a, b = a) st_relate(a, b, pattern = "F***1****") # find nb function
+    
+    grid2 <- grid %>% mutate(empty_nb = st_rook(.)) # find all nb in grid
+    
+    grid2 %<>% filter(empty == 1) # get only ones which are no empty
+  
 
-which(duplicated(dat$TripID) == TRUE) # Should be none
+test <- grid %>% filter(gridID_alt %in% c(empty_int[[1]], empty_int[[2]], empty_int[[3]])) # get those in list
+
+t2 <- test %>% filter(empty == 0, sz == 0) # filter to get applicable nb
+
+t2ID <- unique(t2$gridID_alt) # isolate ids of applicable neighbours
+
+
+# need to change grid iod of emoty one to match id in t2ID which is in empty_nb column 
+
+# need 
+t3 <- grid2 %>% 
+  mutate(empty_nb2 = ifelse(empty_nb %in% t2ID, "YES", "NO"))
+
+grid3 %>%
+  group_by(empty) %>% 
+  summarize(geometry = st_union(geometry))
+
+ggplot() +
+  geom_sf(data = grid, fill = "yellow") +
+  geom_sf(data = t2, fill = "red")
+  geom_sf(data = empty_int, fill = "blue")
+  
+  t3[, c("empty_nb", "empty_nb2")]
 ```
-
-## Choice set
-```{r message=FALSE}
-grid <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03, by = 0.02, min_area = 0, crs = 4283, vert = FALSE) # crs using degrees
-```
-# simulation stats
-```{r}
-grid %>% group_by(sz, sz_current, sz_w_value) %>%  summarise("Area (km2)" = sum(area)) # area of sz with and without value
-grid %>% group_by(sz) %>% summarise(use_count = sum(use_count)) # use count in and out sz
-
-mp <- st_read("./data/gpkg/pmmp_4326.gpkg") %>% st_transform(crs(dat))
-coast <- st_read("./data/gpkg/Coast_4283.gpkg") %>% st_transform(crs(mp))
-
-sz_mp <- grid %>% filter(sz == 1) %>% st_union()
-
-sz_area <- sum(as.numeric(round(set_units(st_area(sz_mp), km^2), 2))) # total area of sz
-mp_area <- as.numeric(round(set_units(st_area(mp), km^2), 2)) # total area pf mp
-per_sz <- round((sz_area/mp_area)*100, 2) # percentage of mp to be made sz
-
-# mp$use_count <- lengths(st_intersects(mp, dat))
-
-# calculate mp length of coast
-# calculate length of coast that has sz 
-# percentage of sz that have access to the shore
-
-# mp_coast <- st_touches(mp, coast)
-# peri <- st_perimeter(mp_coast)
-# 
-# ggplot()+
-#   # geom_sf(data = mp) +
-#   # geom_sf(data = sz_mp) +
-#   geom_sf(data = mp_coast, colour = 'red')
-```
-
 
 ## Attributes
+
+
 ```{r}
-site_centroid <- st_centroid_within_poly(grid) # gets centroid of every grid cell
-grid$site_centroid <- site_centroid$geom # appending centroid
-
-# checkpoint
-ggplot() +
-  geom_sf(data = grid$geom) +
-  geom_sf(data = grid$site_centroid, color = 'red')
-
-# getting distance from each boat rampe to the centroid of the sites
-BR <- st_transform(BR, crs(grid))
-dist <- as.data.frame(set_units(st_distance(grid$site_centroid, BR), km)) 
-names(dist) <- unique(BR$RampID)
-gridID_alt <- grid$gridID_alt
-dist$gridID_alt <- gridID_alt
-dist <- dist %>% gather("BR", "site.centroid_km.BR", 1:length(dist) - 1) 
-grid <- grid %>% left_join(dist, by = "gridID_alt") # join 
-
-grid <- grid |> st_sf() |> # wont work without st_sf()
-  dplyr::select(-site_centroid)
+ grid <-  ascAtt(ascGrid = grid, grid_id = "gridID_alt", point = dat, br = BRtrips, br_id = "RampID",
+              crs = 4283)
 ```
-
 ## Data wrangle
 ```{r}
-# isolating grid id to append to dat
-gridID_vis <- grid %>% 
-  dplyr::select(gridID_alt, geom) %>% 
-  distinct() 
+    # isolating grid ID to append to dat
+    gridID_vis <- grid %>%
+      dplyr::select(gridID_alt, asc_geom) %>%
+      distinct()
 
-# st_write(gridID_vis, 
-#          paste0("./data/gpkg/2.1_acChoiceSetQ", sim_name, "_4283.gpkg"), 
-#          append = FALSE) # need to write with st_write to open in QGISRUMs
+    # allocating sites to grids
+    dat  %<>% st_join(gridID_vis, left = T, join = st_intersects)
 
-dat <- st_crop(dat, grid) # removing outliers
+    # selecting attributes, and tidying
+    dat %<>%
+      rename(gridID_vis = gridID_alt, dat_geom = geometry) %>%
+      #'[#NOTE: select vars for model] 
+      #'Mandatory vars: TripID, PersonID, gridID_vis, Site, BoatLength  
+      dplyr::select(TripID, PersonID, gridID_vis, Site, BoatLength) %>% 
+      distinct() %>%
+      mutate(RampID = ifelse(Site %in% "ExmouthBR", 85, NA),
+             RampID = ifelse(Site %in% "CoralBayBR", 72, RampID),
+             RampID = ifelse(Site %in% "BundegiBR", 73, RampID),
+             RampID = ifelse(Site %in% "TantabiddiBR", 87, RampID)) %>%
+      # mutate(UseLong = st_coordinates(.)[,1]) %>%
+      # mutate(UseLat = st_coordinates(.)[,2]) %>%
+      # dplyr::select(-Site) %>%
+      as.data.frame()
 
-# allocating sites to grids
-dat  %<>% st_join(gridID_vis, left = T, join = st_intersects)
+    # check there are no missing gridID_vis
+    # a <- dat[which(is.na(dat$gridID_vis)), ]
+    # a
+    # 
+    # ggplot() +
+    #   geom_sf(data = grid$asc_geom) +
+    #   geom_sf(data = a$dat_geom)
+    
+    #'[#VALIDATE: TRUE, there are no unassigned gridIDs]
+    
+    identical((which(is.na(dat$gridID_alt) == TRUE)), integer(0)) == TRUE
+    
+    # join
+    t1 <- nrow(dat) # copying original data test join
 
-# selecting attributes, and tidying
-dat %<>% 
-  rename(gridID_vis = gridID_alt) %>% 
-  dplyr::select(TripID, PersonID, gridID_vis, Site) %>% 
-  distinct() %>% 
-  mutate(BR = ifelse(Site %in% "Hillarys", "104", NA),
-         BR = ifelse(Site %in% "Mindarie", "105", BR),
-         BR = ifelse(Site %in% "OceanReef", "106", BR),
-         BR = ifelse(Site %in% "TwoRocks", "112", BR)) %>% 
-  # mutate(UseLong = st_coordinates(.)[,1]) %>% 
-  # mutate(UseLat = st_coordinates(.)[,2]) %>% 
-  dplyr::select(-Site) %>% 
-  as.data.frame()
-
-# checkpoint
-which(is.na(dat$gridID_alt) == TRUE) # should be none
+    dat <- inner_join(dat, grid, by = "RampID") 
+    
+    #'[#VALIDATE: TRUE, number of sites * number of trips == nrow(dat), unless sites have been removed eg. beach launching sites]
+    
+    t1*nrow(gridID_vis) == nrow(dat)
 ```
-
-## Join data to choice set
-```{r join}
-og_dat <- dat # copying original data test join
-
-dat <- inner_join(dat, grid, by = "BR") # FALSE
-
-# checkpoint
-a <- as.data.frame(table(og_dat$BR)) %>% rename(launches = Freq)
-b <- as.data.frame(table(grid$BR)) %>%  rename(n_sites = Freq)
-c <- left_join(a, b)
-c$times <- c$launches*c$n_sites
-test = sum(c$times)
-test == nrow(dat) # this should be TRUE
-```
-
 ## Distance to BR
-Distance from the boat ra,mp to the centroid of data points in each grid that launched from that boat ramp - if not takes centroid of grid cell. 
+
+Distance from the boat ramp to the centroid of data points in each grid that launched from that boat ramp - if not takes centroid of grid cell. 
+
+
 ```{r message=FALSE}
-dat <- dat %>% 
-  st_as_sf() # turn to sf object
+#'[#NOTE:could wrap below bit in separate function - use_centroid and other could be site_centroid] 
 
-# get centroid of use points
-tmp <- dat %>%
-  group_by(gridID_vis, BR) %>%
-  summarise(use_centroid = st_union(geometry)) %>%
-  st_centroid() %>%
-  ungroup() %>%
-  mutate(id = row_number())
-
-# making distance data frame
-dist <- as.data.frame(set_units(st_distance(tmp, BR), km)) # distance from use centroid to each BR
-names(dist) <- unique(BR$RampID) 
-dist$gridID_vis <- tmp$gridID_vis 
-dist$BR <- tmp$BR 
-dist$id <- tmp$id 
-len <- length(dist) - 3 
-dist <- dist %>% gather("BRdist", "use.centroid_km.BR", 1:len) # gather
-dist$use.centroid_km.BR <- as.numeric(dist$use.centroid_km.BR) 
-
-dist <- dist %>% 
-  filter(BR == BRdist) %>% 
-  dplyr::select(gridID_vis, BR, use.centroid_km.BR) %>% 
-  rename(gridID_alt = gridID_vis) # got to join to alt not visited
-
-dat <- as.data.frame(dat)
-
-dat <- left_join(dat, dist, by = c("BR", "gridID_alt")) # join
-
-dat <- dat %>% 
-  mutate(site.centroid_km.BR = as.numeric(site.centroid_km.BR)) %>% 
-  mutate(km_BR = ifelse(is.na(use.centroid_km.BR), site.centroid_km.BR, use.centroid_km.BR)) # distance tc to be measured from
+    dat <- dat %>% 
+      st_as_sf() # turn to sf object
+    
+    # get centroid of use points
+    tmp <- dat %>%
+      group_by(gridID_vis, RampID) %>%
+      summarise(use_centroid = st_union(dat_geom)) %>%
+      st_centroid() %>%
+      ungroup() %>%
+      mutate(id = row_number())
+    
+    # validation plot: is the use centroid in the middle of each set of uses per boat ramp
+    # ggplot() +
+    #   geom_sf(data = dat, aes(geometry = asc_geom)) +
+    #   geom_sf(data = dat, aes(geometry = dat_geom, color = as.factor(RampID)), size = 0.25) +
+    #   geom_sf(data = tmp, aes(geometry = use_centroid, color = as.factor(RampID)), shape = 8) +
+    #   ggtitle("Check dots are in centroid of uses in cells for each boat ramp") +
+    #   theme(plot.title = element_text(hjust = 0.5)) +
+    #   theme_classic() +
+    #   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    #         legend.spacing.y = unit(0.75, "cm"))
+    
+    # making distance data frame
+    dist <- as.data.frame(round(set_units(st_distance(tmp, BRtrips), km), 2)) # distance from use centroid to each BR
+    names(dist) <- unique(BRtrips$RampID) 
+    dist$gridID_vis <- tmp$gridID_vis 
+    dist$RampID <- tmp$RampID 
+    dist$id <- tmp$id 
+    len <- length(dist) - 3
+    dist %<>% gather("BRdist", "use.centroid_km.br", 1:len) 
+    dist[] <- sapply(dist, as.numeric) # change all cols to numeric
+    
+    dist <- dist %>% 
+      filter(RampID == BRdist) %>% 
+      dplyr::select(-c(id, BRdist)) %>% 
+      rename(gridID_alt = gridID_vis) # got to join to alt not visited
+    
+    dat <- as.data.frame(dat)
+    
+    dat <- left_join(dat, dist, by = c("RampID", "gridID_alt")) # join
+    
+    dat <- dat %>% 
+      mutate(km_BR = ifelse(is.na(use.centroid_km.br), site.centroid_km.br,
+                            use.centroid_km.br)) # distance tc to be measured from
+    
+    # validation plot
+    ggplot(dat) +
+      geom_sf(aes(geometry = asc_geom, fill = use.centroid_km.br), lwd = 0.25) +
+      geom_sf(aes(geometry = br_geom), size = 3) +
+      theme_classic() +
+      scale_fill_distiller(palette = "Blues") +
+      labs(fill = "km from BR", colour = "") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+            legend.spacing.y = unit(0.75, "cm")) +
+      facet_grid(.~fac_br_id) +
+      ggtitle("Check distances look accurate")
 ```
 
 ## Choice and travel cost ($0.54/km)
 ```{r choice and travel cost}
-dat <- dat %>% 
-  # mutate(centroidLong = st_coordinates(polyCentroid)[,1]) %>% # need this is using dynamic variables
-  # mutate(centroidLat = st_coordinates(polyCentroid)[,2]) %>%
-  mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>% 
-  mutate(travelCost = as.numeric(0.58*km_BR)) %>%  # 0.58 = ave fuel price/consumption
-  dplyr::select(-c(geometry, site.centroid_km.BR, use.centroid_km.BR))
+    dat <- dat %>% 
+      # mutate(centroidLong = st_coordinates(polyCentroid)[,1]) %>% # need this is
+      # using dynamic variables
+      # mutate(centroidLat = st_coordinates(polyCentroid)[,2]) %>%
+      mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>% 
+      mutate(travelCost = as.numeric(0.58*km_BR)) # 0.58 = ave fuel price/consumption
+
+
+#'[#TODO:make a function which appends average for area fuel price to month fo visit for tc calculation ]  
+
+    
+    #'[#VALIDATE: TRUE, should equal number of trips]
+    sum(dat$choice) == n_distinct(dat$TripID)
 ```
 
 ## Filtering SZ
   - Current sz will have no data and therefore no value so are removed
   - Simulated sz that have no data have no value so are  removed
 ```{r}
-# remove all current sz (sz_curret is made from gridID_alt)
-dat %<>% filter(sz_current != 1)
-
-# remove observations that have visited the current sz (removed above)
-sz_current_w_use <- setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
-# length(sz_current_w_use) # number of current sz that have use in it
-# length(which(dat$gridID_vis %in% sz_current_w_use))/length(unique(dat$gridID_alt)) # n trips to sz current
-
-dat %<>% filter(!(gridID_vis %in% sz_current_w_use))
-
-dat %<>% filter(sz_wo_value != 1)
-
-# test: should be no difference between gridID_alt and gridID_vis because all grids ahould have at least 1 data point.
- setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
- setdiff(unique(dat$gridID_alt), unique(dat$gridID_vis))
-
- #removing sz columns
-sz_to_remove <- dat %>% 
-  dplyr::select(num_range("sz", 1:100)) %>% 
-  summarise_all(sum) 
-
-sz_to_remove <- names(sz_to_remove[, which(sz_to_remove %in% 0)])
- 
-dat_rum_sf <- dat %>% dplyr::select(-c(sz_to_remove))
-dat_rum_df <- dat %>% dplyr::select(-c(sz_to_remove, sz_current, sz_wo_value, geom))
-
-# plots
-sz_w_value_plot <- ggplot() +
-  geom_sf(data = grid$geom, aes(fill = as.factor(grid$sz_w_value)), lwd = 0.25) +
-  xlab("Longitude") + ylab("Latitude") +
-  labs(fill = "Value") +
-#   geom_sf(data = dat$geom, size = 0.5) +
-  my_theme +
-  ggtitle("SZ with value")
-
-sz_wo_value_plot <- ggplot() +
-  geom_sf(data = grid$geom, aes(fill = as.factor(grid$sz_wo_value)), lwd = 0.25) +
-  xlab("Longitude") + ylab("Latitude") +
-  labs(fill = "Value") +
-#   geom_sf(data = dat, size = 0.5) +
-  my_theme +
-  ggtitle("SZ without value")
-
-sz_w_value_plot
-sz_wo_value_plot
+    # Remove sites with no recreational value
+    dat <- dat %>%  filter(sz_value == 1 | is.na(sz_value))
+    
+    # remove observations that have visited the current sz (removed above)
+    sz_current_w_use <- setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
+    
+    dat2 <- dat %<>% filter(!(gridID_vis %in% sz_current_w_use))
+    
+    #'[#VALIDATE: TRUE, no difference between gridID_alt/vis as every cells needs data]
+  
+     setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
+     setdiff(unique(dat$gridID_alt), unique(dat$gridID_vis))
+     
+    
+     
+    # removing sz columns
+    sz_to_remove <- dat %>% 
+      dplyr::select(num_range("sz", 1:100)) %>% 
+      summarise_all(sum) 
+    
+    sz_to_remove <- names(sz_to_remove[, which(sz_to_remove %in% 0)])
+     
+    dat_rum_sf <- dat %>% dplyr::select(-c(sz_to_remove))
+    dat_rum_df <- dat %>% dplyr::select(-c(sz_to_remove, asc_geom, br_geom, centroid, dat_geom))
+    dat_df <- dat %>% dplyr::select(-c(asc_geom, br_geom, centroid, dat_geom))
+    
+    #'[#TODO: check this]  
+    nrow(dat) == n_distinct(dat_df$gridID_alt) * n_distinct(dat_df$TripID)
+    
+    
 ```
 
-## Save outputs
+# Save
 ```{r save}
-
-sim_name <- "test"
-# plot
-ggsave(sz_w_value_plot, path = "./plots/ASC RUM", filename = paste("acSZwValue_", sim_name, ".png", sep = ''), width = 4, height = 4)
-
-ggsave(sz_wo_value_plot, path = "./plots/ASC RUM", filename = paste("acSZwoValue_", sim_name, ".png", sep = ''), width = 4, height = 4)
-
-# data with grids cells with no value
-saveRDS(dat, paste0("./data/gpkg/2.1_acChoiceSet_",sim_name ,"4283.gpkg"))
-write_csv(dat, paste0("./data/02_data/2.1_ac", sim_name,".csv"))
-
-# data without grids cells with no value, for model
-saveRDS(dat_rum_sf, paste0("./data/gpkg/2.1_acChoiceSet_rum", sim_name,"_4283.gpkg")) # script 3.1
-write_csv(dat_rum_df, paste0("./data/02_data/2.1_ac", sim_name,"_rum.csv")) # stata
+    # full grid including sites with no recreational value
+    saveRDS(dat, paste0("./data/gpkg/sims/2.1_ascCS_",sim_name ,"_4283.gpkg"))
+    write_csv(dat_df, paste0("./data/02_data/2.1_asc_", sim_name,".csv"))
+    
+    # full grid excluding sites with no recreational value
+    saveRDS(dat_rum_sf, paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim_name,"_4283.gpkg")) # script 3.1
+    write_csv(dat_rum_df, paste0("./data/02_data/2.1_asc_rum_", sim_name,".csv")) # stata
+    
+    # simplified ascGrid for QGIS (geom, ID)
+    st_write(gridID_vis,
+             paste0("./data/gpkg/sims/2.1_ascCSQ", sim_name, "_4283.gpkg"),
+             append = FALSE) # need to write with st_write to open in QGISRUMs
 ```
