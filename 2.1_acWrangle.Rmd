@@ -194,21 +194,52 @@ deSliver <- function(x, threshold) {
   #     group_by(gridID_alt) %>% 
   #     summarize() 
   #   
+g <- grid %>% filter(grid$id %in% 10)
 
-
-# ggplot() +
-#   # geom_sf(data = grid, aes(fill = data_present))
+ggplot() +
+  # geom_sf(data = grid, aes(fill = data_present))
 #   # # geom_sf(data = grid0_nb_id, fill = "red")+
 #   # # geom_sf(data = merge_from, fill = "blue")
-#   # geom_sf(data = grid, aes(fill = sz_type))
-#   # geom_sf(data = grid, fill = "yellow")+
-#   geom_sf(data = grid)
+  # geom_sf(data = coast_lam)+
+  # geom_sf(data = poly_lam, fill = "red")
+  # geom_sf(data = npz_lam)
+  # geom_sf(data = a, fill = "red")
+  # geom_sf(data = npz_lam)
+  # geom_sf(data = g, aes(fill = as.factor(id)))
+  # geom_sf(data = grid_base, fill = "yellow")+
+  geom_sf(data = grid, aes(fill = as.factor(gridID_alt)))
+  # geom_sf(data = npz, fill = "red")
 
 # 24 is grid id of third false which is point cloast shore fishing zone
 #18 is the mangrove bay zone that is mergeing for some reason
 # b <- grid %>% filter( gridID_alt == 18)
-
+  
+# sim_lam <- sim %>%  st_transform(crs = 3112)
+# npz_lam <- npz %>%  st_transform(crs = 3112)
+# coast_lam <- coast %>%  st_transform(crs = 3112)
+# poly_lam <- grid_base %>%  st_transform(crs = 3112)
+# 
+# b <- st_snap(sim_lam, npz_lam ,tolerance =  0.001)
+# c <- st_snap(npz_lam, coast_lam ,tolerance =  0.001)
+# 
+# a <- st_difference(npz_lam, st_combine(poly_lam))
+# 
+# st_erase = function(x, y) st_difference(x, st_union(st_combine(y)))
+# 
+# a <- st_erase(poly_lam, npz_lam)
+# 
+# u = st_union(rbind(nbrs.buff, one))
+# 
+# grid1 <- grid %>% st_cast("MULTIPOLYGON") %>% st_cast("POLYGON")
+# grid1$area <- as.numeric(set_units(st_area(grid1), km^2))
+# grid1 %<>% filter(area > 10)
+# 
+# sim$area <- st_area(sim)
+# npz$area <- st_area(npz)
+# 
+# which(grid1$sz %in% 1,)
 ```
+
 
 ## Attributes
 

@@ -51,15 +51,16 @@ ASCgrid <- function(poly, #  sf polygon to split
   # }
 
   # make crs for every sf object the same 
-  poly %<>% st_transform(crs)
+  poly %<>% st_transform(crs) %>% st_make_valid()
   # ntz %<>% st_transform(crs)
-  sz_sim %<>% st_transform(crs) %>% st_crop(poly)
-  sz_current %<>% st_transform(crs) %>% st_crop(poly)
-  point %<>% st_transform(crs) %>% st_crop(poly)
+  sz_sim %<>% st_transform(crs) %>% st_crop(poly) %>% st_make_valid()
+  sz_current %<>% st_transform(crs) %>% st_crop(poly) %>% st_make_valid()
+  point %<>% st_transform(crs) %>% st_crop(poly) %>% st_make_valid()
   
   # add npz col, all should be 1 and filled in with 0 when data expanded
   sz_current <- sz_current %>% 
-    mutate(sz_current = 1)
+    mutate(sz_current = 1) %>% 
+    dplyr::select(sz_current)
   
   # add sz col all should be 1, and row numbers for loop
   sz_sim %<>% 
@@ -74,30 +75,48 @@ ASCgrid <- function(poly, #  sf polygon to split
   }
   
   # making ntz layer: combining npz and current sz with sims
-   sim_holes <- st_difference(sz_sim, st_combine(sz_current)) # cut npz out of sims
-   
-  # working on slivers 
-  # return(sim_holes)
-  # stop()
-  # 
+  sim_holes <- st_difference(sz_sim, st_union(st_combine(sz_current))) # cut npz out of sims
+  sim_holes %<>% st_cast("MULTIPOLYGON") %>% st_cast("POLYGON") # separate litte extra bits
+  sim_holes$area <- as.numeric(set_units(st_area(sim_holes), km^2)) # calc area
+  sim_holes %<>% filter(area > 10) # remove slivers under 10 km2
+  sim_holes %<>% dplyr::select(-area)
   
   # joining sims and npz while maintaining attributes
   sim_holes_df <- sim_holes %>% as.data.frame() %>% mutate(geom = as.character(geom))
   sz_current_df <- sz_current %>% as.data.frame() %>% mutate(geom = as.character(geom))
   
-  ntz <- full_join(sim_holes_df, sz_current_df) %>%
+  ntz <- full_join(sim_holes_df, sz_current_df) %>% 
     mutate(id = row_number()) %>%
     mutate_if(is.numeric, ~replace_na(., 0))
   
   sim_holes_geom <- st_as_sf(sim_holes$geom)
   npz_geom <- st_as_sf(sz_current$geom)
-  
+
   ntz_geom <- rbind(sim_holes_geom, npz_geom)
-  
-  ntz <- cbind(ntz, ntz_geom) %>%
-    st_as_sf() %>%
+
+  ntz <- cbind(ntz, ntz_geom) %>% 
     dplyr::select(-geom) %>%
-    rename(geom = x)
+    rename(geom = x) %>% 
+    st_as_sf() 
+  
+  # # joining sims and npz while maintaining attributes
+  # chunk for when using pre-made sim with holes
+  # sz_sim_df <- sz_sim %>% as.data.frame() %>% mutate(geom = as.character(geom))
+  # sz_current_df <- sz_current %>% as.data.frame() %>% mutate(geom = as.character(geom))
+  # 
+  # ntz <- full_join(sz_sim_df, sz_current_df) %>%
+  #   mutate(id = row_number()) %>%
+  #   mutate_if(is.numeric, ~replace_na(., 0))
+  # 
+  # sz_sim_geom <- st_as_sf(sz_sim$geom)
+  # npz_geom <- st_as_sf(sz_current$geom)
+  # 
+  # ntz_geom <- rbind(sz_sim_geom, npz_geom)
+  # 
+  # ntz <- cbind(ntz, ntz_geom) %>%
+  #   st_as_sf() %>%
+  #   dplyr::select(-geom) %>%
+  #   rename(geom = x)
   
  # count number of uses in each site   
  ntz$use_count <- lengths(st_intersects(ntz, point))
@@ -109,7 +128,7 @@ ASCgrid <- function(poly, #  sf polygon to split
    mutate(id = row_number())
   
   # cutting ntz out of polygon to make grid in
-  poly_w_ntz <- st_difference(st_make_valid(poly), st_combine(ntz)) # crops ntz out of grid
+  poly_w_ntz <- st_difference(st_make_valid(poly), st_union(st_combine(ntz))) # crops ntz out of grid
   
   poly_w_ntz %<>% 
     st_cast('MULTIPOLYGON') %>%
