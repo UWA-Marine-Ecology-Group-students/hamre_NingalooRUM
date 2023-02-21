@@ -23,20 +23,10 @@
     library(todor)
     
     # data
-    # BR <- st_read("./data/shp/natBR.shp") # boat ramps
-    BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% # from BRtrips.R
-      st_transform(crs = 4283)
-    
     npz <- st_read("./data/gpkg/ntz.gpkg") %>% 
       st_transform(crs = 4283)
     
-    grid_base <- st_read("./data/gpkg/ascBase_v2.gpkg") %>% 
-      st_transform(crs = 4283)
-    
     dat <- read_csv("data/01_data/1.2_dat.csv")
-    
-    # mp <- st_read("./data/gpkg/pmmp_4326.gpkg") %>% 
-    #   st_transform(crs = 4283)
     
     coast <- st_read("./data/gpkg/coast.gpkg") %>% 
       st_transform(crs = 4283)
@@ -63,7 +53,7 @@ All data filters have to be done before making the choice set.
     dat %<>% 
   #'[#NOTE check all filters have been applied to data eg. activity type, site type and site]
   
-      filter(ActivityType == "Extractive" & SiteType == "Boat" & str_detect(Site, 'BR')) %>% # filtering activity
+      filter(ActivityType %in% c("Both", "Non-Extractive") & SiteType == "Shore") %>% # filtering activity
       filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
       st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)  ## make sf object
       
@@ -72,8 +62,12 @@ All data filters have to be done before making the choice set.
       group_by(PersonID, TripID) %>% 
       slice(which.max(decDuration)) %>% 
       ungroup() 
-      
-      dat <- st_crop(dat, grid_base) # removing outliers 
+    
+    # filtering out shore activity more than 1 km form shore
+    dat %<>% 
+      mutate(dist_coast = as.numeric(st_distance(dat, coast))) %>% 
+      filter(dist_coast < 1000)
+
     
       #'[#VALIDATE: TRUE, no duplicated trip IDs)]
       identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
@@ -84,73 +78,64 @@ All data filters have to be done before making the choice set.
 Creates smallest ASC grid possible within the base grid, given the distribution of data. Each cell must have at least 1 data point in it. 
 Calculates basic stats for simulation and current marine park (eg. area, beach access etc.)
 
+
 ```{r}
+# snap points to line
+coast_line <- coast %>% st_cast("MULTILINESTRING")
 
-deSliver <- function(x, threshold) {
-  backToSf <- FALSE
-  if (class(x)[1] == "sf") {
-    backToSf <- TRUE
-    x$tempArea <- as.numeric(st_area(x))
-  } else {
-    x<- st_as_sf(x)
-    x$tempArea <- as.numeric(st_area(x))
-  }
+st_snap_points = function(x, y, max_dist = 1000) {
 
-  #determine slivers by area
-  xSlivers <- x[x$tempArea < threshold, ]
-  xNotSlivers <- x[x$tempArea > threshold, ]
-  if (nrow(xNotSlivers) < 1) {
-    stop("Threshold exceeds the area of every polygon. Please select a smaller number")
-  }
+  if (inherits(x, "sf")) n = nrow(x)
+  if (inherits(x, "sfc")) n = length(x)
 
-  #Split slivers from multipolygon, or nearest feature may be incorrect
-  xSlivers <- suppressWarnings(st_cast(xSlivers, 'POLYGON'))
-
-  #Find nearest non-sliver
-  nearestFeature <- st_nearest_feature(xSlivers, xNotSlivers)
-
-  #Merge each sliver polygon into nearest neighbour
-  mergeSlivers <- lapply(
-    unique(nearestFeature),
-    FUN = function(i,
-                   ns = xNotSlivers,
-                   s = xSlivers,
-                   nf = nearestFeature) {
-      featurePolys <- nearestFeature == i
-      xMerge <- s[featurePolys, ] %>%
-        st_union(.)
-      yMerge <- ns[i, ]
-      #convert slivers back to multipolygon
-      out <- sf::st_union(x = xMerge, y = yMerge) %>%
-        as_Spatial(.)
-      yMergeSpd <- sf::as_Spatial(yMerge)
-      out <- SpatialPolygonsDataFrame(Sr = out,
-                                 data = yMergeSpd@data,
-                                 match.ID = FALSE)
-
-      return(out)
-    }
+  out = do.call(c,
+                lapply(seq(n), function(i) {
+                  nrst = st_nearest_points(st_geometry(x)[i], y)
+                  nrst_len = st_length(nrst)
+                  nrst_mn = which.min(nrst_len)
+                  if (as.vector(nrst_len[nrst_mn]) > max_dist) return(st_geometry(x)[i])
+                  return(st_cast(nrst[nrst_mn], "POINT")[2])
+                })
   )
-
-  if (length(mergeSlivers) > 1) {
-  m <- bind(mergeSlivers)
-  } else {
-    m <- mergeSlivers[[1]]
-  }
-
-  #Remove the temporary column
-  m$tempArea <- NULL
-
-  #remove self-intersecting geometries
-  m <- gBuffer(spgeom = m, byid = TRUE, with = 0)
-
-  if (backToSf) {
-    m <- st_as_sf(m)
-  }
-  return(m)
+  return(out)
 }
-```
 
+dat <- st_snap_points(dat, coast_line)
+
+dat_lam <- dat %>%  st_transform(crs = 3112)
+
+pts_buff <- 
+  st_buffer(dat_lam, dist = 10500) %>% 
+  st_union() %>% 
+  st_sf() %>% 
+  st_transform(crs = 4283) %>% 
+  st_cast("POLYGON") %>% 
+  mutate(area = set_units(st_area(.), km^2),
+         area = as.numeric(area)) 
+  
+  
+
+
+coast_crop <- st_crop(coast_line, pts_buff)
+ # now you have to somehow split the line into separate line (zone if you will)
+
+
+
+ggplot()+
+  geom_sf(data = pts_buff) +
+  geom_sf(data = coast_line)
+  # geom_sf(data = npz) +
+  # # geom_sf(data = coast_line)+
+  # # geom_sf(data = sz_sh, aes(colour = as.factor(id))) 
+  # geom_sf(data = sz_sh, colour = "red") 
+  # geom_sf(data = sh)
+  geom_sf(data = dat)
+
+bbox <- st_bbox()
+
+sz_sh <- st_intersection(npz, coast_line) %>% mutate(id = row_number())
+sh <- st_difference(coast_line, npz)
+```
 
 ```{r message = FALSE}
 # asc grid

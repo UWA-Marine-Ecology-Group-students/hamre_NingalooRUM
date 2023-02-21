@@ -49,15 +49,13 @@ ASCgrid <- function(poly, #  sf polygon to split
   # if (missing(sz_current)) {
   #   stop("Missing sz_current, continuing assuming there no current sz")
   # }
-   
+
   # make crs for every sf object the same 
   poly %<>% st_transform(crs)
   # ntz %<>% st_transform(crs)
   sz_sim %<>% st_transform(crs) %>% st_crop(poly)
   sz_current %<>% st_transform(crs) %>% st_crop(poly)
   point %<>% st_transform(crs) %>% st_crop(poly)
-  
-  
   
   # add npz col, all should be 1 and filled in with 0 when data expanded
   sz_current <- sz_current %>% 
@@ -76,7 +74,12 @@ ASCgrid <- function(poly, #  sf polygon to split
   }
   
   # making ntz layer: combining npz and current sz with sims
-  sim_holes <- st_difference(sz_sim, st_combine(sz_current)) # cut npz out of sims
+   sim_holes <- st_difference(sz_sim, st_combine(sz_current)) # cut npz out of sims
+   
+  # working on slivers 
+  # return(sim_holes)
+  # stop()
+  # 
   
   # joining sims and npz while maintaining attributes
   sim_holes_df <- sim_holes %>% as.data.frame() %>% mutate(geom = as.character(geom))
