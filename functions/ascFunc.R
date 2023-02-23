@@ -19,12 +19,7 @@
 
 # 
 #'[#TODO make it so you can add commonwealth and state sz separately]
-#'[#TODO how to make sure the function doesn't make tiny slithers (min_area)]
 #'[#TODO make sure you can get to work with projections with different units]
-#'[#TODO add crop function to other files]  
-
-#'[#REVIEW: is there a better way to check if all cells have a different id]
-
 
 ASCgrid <- function(poly, #  sf polygon to split
                     # ntz,
@@ -33,7 +28,6 @@ ASCgrid <- function(poly, #  sf polygon to split
                     point, # spatial use data
                     from, # starting value of distance between grid lines, same units as crs
                     by, # incrementally distance increase to iterate over, same units as crs
-                    # min_area = 20, # min allowable area km2
                     vert = FALSE, # make line orientation perpendicular to lines in poly
                     crs # vertical or horizontal divisions
                     ) { # height if plots
