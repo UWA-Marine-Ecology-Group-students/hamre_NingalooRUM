@@ -21,6 +21,7 @@
 #'[#TODO make it so you can add commonwealth and state sz separately]
 #'[#TODO make sure you can get to work with projections with different units]
 
+
 ASCgrid <- function(poly, #  sf polygon to split
                     # ntz,
                     sz_sim, # sf polygon of sz scenarios to simulate

@@ -90,7 +90,8 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
                     by = 0.02, crs = 4283, vert = FALSE) 
 
 #'[#NOTE:Check empty grids before removing]  
-  grid %<>% filter(data_present == TRUE) 
+  emp <- grid[which(grid$data_present == FALSE),]
+  grid %<>% filter(gridID_alt != emp$gridID_alt) 
 ```
 
 ```{r}
@@ -110,6 +111,8 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
 
 
 ```{r}
+st_geometry(grid) <- "geom"
+
  grid <-  ascAtt(ascGrid = grid, grid_id = "gridID_alt", point = dat, br = BRtrips, br_id = "RampID",
               crs = 4283)
 ```
@@ -275,8 +278,6 @@ Distance from the boat ramp to the centroid of data points in each grid that lau
     
     #'[#TODO: check this]  
     nrow(dat) == n_distinct(dat_df$gridID_alt) * n_distinct(dat_df$TripID)
-    
-    
 ```
 
 # Save
