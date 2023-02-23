@@ -84,90 +84,16 @@ All data filters have to be done before making the choice set.
 Creates smallest ASC grid possible within the base grid, given the distribution of data. Each cell must have at least 1 data point in it. 
 Calculates basic stats for simulation and current marine park (eg. area, beach access etc.)
 
-```{r}
-
-deSliver <- function(x, threshold) {
-  backToSf <- FALSE
-  if (class(x)[1] == "sf") {
-    backToSf <- TRUE
-    x$tempArea <- as.numeric(st_area(x))
-  } else {
-    x<- st_as_sf(x)
-    x$tempArea <- as.numeric(st_area(x))
-  }
-
-  #determine slivers by area
-  xSlivers <- x[x$tempArea < threshold, ]
-  xNotSlivers <- x[x$tempArea > threshold, ]
-  if (nrow(xNotSlivers) < 1) {
-    stop("Threshold exceeds the area of every polygon. Please select a smaller number")
-  }
-
-  #Split slivers from multipolygon, or nearest feature may be incorrect
-  xSlivers <- suppressWarnings(st_cast(xSlivers, 'POLYGON'))
-
-  #Find nearest non-sliver
-  nearestFeature <- st_nearest_feature(xSlivers, xNotSlivers)
-
-  #Merge each sliver polygon into nearest neighbour
-  mergeSlivers <- lapply(
-    unique(nearestFeature),
-    FUN = function(i,
-                   ns = xNotSlivers,
-                   s = xSlivers,
-                   nf = nearestFeature) {
-      featurePolys <- nearestFeature == i
-      xMerge <- s[featurePolys, ] %>%
-        st_union(.)
-      yMerge <- ns[i, ]
-      #convert slivers back to multipolygon
-      out <- sf::st_union(x = xMerge, y = yMerge) %>%
-        as_Spatial(.)
-      yMergeSpd <- sf::as_Spatial(yMerge)
-      out <- SpatialPolygonsDataFrame(Sr = out,
-                                 data = yMergeSpd@data,
-                                 match.ID = FALSE)
-
-      return(out)
-    }
-  )
-
-  if (length(mergeSlivers) > 1) {
-  m <- bind(mergeSlivers)
-  } else {
-    m <- mergeSlivers[[1]]
-  }
-
-  #Remove the temporary column
-  m$tempArea <- NULL
-
-  #remove self-intersecting geometries
-  m <- gBuffer(spgeom = m, byid = TRUE, with = 0)
-
-  if (backToSf) {
-    m <- st_as_sf(m)
-  }
-  return(m)
-}
-```
-
-
 ```{r message = FALSE}
 # asc grid
     grid <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03,
                     by = 0.02, crs = 4283, vert = FALSE) 
 
-# manually merged data in QGIS
- # ascGrid for QGIS
-    # st_write(grid,
-    #          paste0("./data/gpkg/sims/2.1_ascGridQ_edit", sim_name, "_4283.gpkg"),
-    #          append = FALSE) # need to write with st_write to open in QGISRUMs
+#'[#NOTE:Check empty grids before removing]  
+  grid %<>% filter(data_present == TRUE) 
+```
 
-# manual is only adding in id var - need rest of variables
-# grid <- st_read("./data/gpkg/ascBase_v2_edit.gpkg") %>%
-#       st_transform(crs = 4283)
-
-
+```{r}
 # no new mp boundary to to run this
 # sim_stats
     # sim_stats <- sim_stats(ascGrid = grid, point = dat, mp = mp, coast = coast, crs = 4283, sim_name = sim_name, path = "./plots/ASC RUM", width = 8, height = 11)
@@ -178,68 +104,7 @@ deSliver <- function(x, threshold) {
     # mp_old <- st_read("./data/gpkg/mar_oldextent.gpkg") %>% st_transform(crs = 4283)
     # mp_stats <- mp_stats(ascGrid = grid, point = dat, mp = mp_old, coast = coast, crs = 4283, mp_name = "marmion", path = "./plots/ASC RUM", width = 8, height = 11)
     # write_csv(mp_stats, paste0("./plots/ASC RUM/", mp_name,"_stats.csv"))
-  
-#'[#REVIEW: this part of the function almost works. although merge is removing border from pt cloast sz? and is also removing mangrove bay cell which has valid data in it]  
-  # st_rook = function(a, b = a) st_relate(a, b, pattern = "F***1****") # find neighbour (nb) function
-  # 
-  #  grid %<>% mutate(grid_nb = as.character(st_rook(.)))  # find neighbours (nb) for each grid cell
-  #   merge_from <- grid %>% filter(data_present == FALSE) #cells with no data that need merged
-  #   grid0_nb_list <- st_intersects(merge_from, grid) %>% unlist() #id list of all empty grid nbs
-  #   merge_to <- grid %>% filter(gridID_alt %in% grid0_nb_list, data_present == TRUE) # df of nb to merge to
-  #   merge_to_id <- as.character(unique(merge_to$gridID_alt))
-  #     
-  #   grid %<>% 
-  #     mutate(merge_to = ifelse(str_detect(grid_nb, merge_to_id), merge_to_id, 0)) %>% 
-  #     mutate(gridID_alt = ifelse(merge_to > 0, merge_to, gridID_alt)) %>% 
-  #     group_by(gridID_alt) %>% 
-  #     summarize() 
-  #   
-g <- grid %>% filter(grid$id %in% 10)
-
-ggplot() +
-  # geom_sf(data = grid, aes(fill = data_present))
-#   # # geom_sf(data = grid0_nb_id, fill = "red")+
-#   # # geom_sf(data = merge_from, fill = "blue")
-  # geom_sf(data = coast_lam)+
-  # geom_sf(data = poly_lam, fill = "red")
-  # geom_sf(data = npz_lam)
-  # geom_sf(data = a, fill = "red")
-  # geom_sf(data = npz_lam)
-  # geom_sf(data = g, aes(fill = as.factor(id)))
-  # geom_sf(data = grid_base, fill = "yellow")+
-  geom_sf(data = grid, aes(fill = as.factor(gridID_alt)))
-  # geom_sf(data = npz, fill = "red")
-
-# 24 is grid id of third false which is point cloast shore fishing zone
-#18 is the mangrove bay zone that is mergeing for some reason
-# b <- grid %>% filter( gridID_alt == 18)
-  
-# sim_lam <- sim %>%  st_transform(crs = 3112)
-# npz_lam <- npz %>%  st_transform(crs = 3112)
-# coast_lam <- coast %>%  st_transform(crs = 3112)
-# poly_lam <- grid_base %>%  st_transform(crs = 3112)
-# 
-# b <- st_snap(sim_lam, npz_lam ,tolerance =  0.001)
-# c <- st_snap(npz_lam, coast_lam ,tolerance =  0.001)
-# 
-# a <- st_difference(npz_lam, st_combine(poly_lam))
-# 
-# st_erase = function(x, y) st_difference(x, st_union(st_combine(y)))
-# 
-# a <- st_erase(poly_lam, npz_lam)
-# 
-# u = st_union(rbind(nbrs.buff, one))
-# 
-# grid1 <- grid %>% st_cast("MULTIPOLYGON") %>% st_cast("POLYGON")
-# grid1$area <- as.numeric(set_units(st_area(grid1), km^2))
-# grid1 %<>% filter(area > 10)
-# 
-# sim$area <- st_area(sim)
-# npz$area <- st_area(npz)
-# 
-# which(grid1$sz %in% 1,)
 ```
-
 
 ## Attributes
 

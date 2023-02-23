@@ -16,6 +16,7 @@
 # size to ensure every site has at least one data point. 
 # By default saves 7x7 sz_value plot in current wd unless otherwise specified with parameters. 
 # Function will crop all sf object to be within poly 
+
 # 
 #'[#TODO make it so you can add commonwealth and state sz separately]
 #'[#TODO how to make sure the function doesn't make tiny slithers (min_area)]
@@ -36,8 +37,8 @@ ASCgrid <- function(poly, #  sf polygon to split
                     vert = FALSE, # make line orientation perpendicular to lines in poly
                     crs # vertical or horizontal divisions
                     ) { # height if plots
-
-  if (missing(poly) || missing(sz_sim) || missing(point)) {
+  
+ if (missing(poly) || missing(sz_sim) || missing(point)) {
     stop("Missing at least one sf file at argument, poly, ntz or point")
   }
 
@@ -190,6 +191,7 @@ ASCgrid <- function(poly, #  sf polygon to split
           print(paste(i, "Grid", sep = " "))
           break
         }
+
       }
     }
     acGrids %<>% rbind(grid)
@@ -206,7 +208,7 @@ ASCgrid <- function(poly, #  sf polygon to split
   
   full_grid <- full_join(grid, ntz) %>%
     mutate_if(is.numeric, ~replace_na(., 0))
-  
+
   full_grid <- cbind(full_grid, full_geom) %>%
     st_as_sf() %>%
     dplyr::select(-geom) %>%
@@ -217,8 +219,53 @@ ASCgrid <- function(poly, #  sf polygon to split
     mutate(sz_type = ifelse(sz_current %in% 1 & sz %in% 1, "Current",
                             ifelse(sz_current %in% 0 & sz %in% 1, "Simulated", NA)))
   
+  # merging geometries that have no data becayuse of base_grid and szs defined
+  st_rook = function(a, b = a) st_relate(a, b, pattern = "F***1****") # find neighbour (nb) function
+  
+  temp_grid <- full_grid %>% mutate(grid_nb = st_rook(.))  # find neighbours (nb) for each grid cell
+  merge_from <- full_grid %>% filter(data_present == FALSE) #cells with no data that need merged
+  grid0_nb_list <- st_intersects(merge_from, full_grid) %>% unlist() #id list of all empty grid nbs
+  
+  # df of nb to merge to - this will only merge to areas which are not in a sz so will exclude shore fishing
+  # zones surrounded by sz, those area will have to be removed. 
+  
+  merge_to <- full_grid %>% filter(gridID_alt %in% grid0_nb_list, data_present == TRUE) 
+  merge_to_id <- as.character(unique(merge_to$gridID_alt))
+  
+  temp_grid %<>%
+    mutate(merge_to = ifelse(str_detect(grid_nb, merge_to_id), merge_to_id, 0)) %>% # ids all rows nb with merge_to
+    mutate(merge_to = ifelse(merge_to > 0 & data_present == TRUE | merge_to > 0 & sz == 1, 
+                             0, merge_to)) %>%  # selects only the nbs to be merged
+    mutate(gridID_alt = ifelse(merge_to > 0, merge_to, gridID_alt)) %>% 
+    group_by(gridID_alt) %>% 
+    summarise()
+  
+  # turn into dfs and left join
+  full_grid %<>% as.data.frame() %>% dplyr::select(-geom)
+  temp_grid %<>% 
+    mutate(gridID_alt = as.numeric(gridID_alt)) %>% 
+    rename(geometry = geom) %>% 
+    as.data.frame()
+  full_grid <- left_join(temp_grid, full_grid, by = "gridID_alt") %>% st_as_sf()
+  
   full_grid$area <- as.numeric(round(set_units(st_area(full_grid), km^2), 2))
   full_grid$use_count <- lengths(st_intersects(full_grid, point))
+  
+  
+  emp <- full_grid %>% filter(data_present == FALSE)
+  
+  if (nrow(emp) > 0) {
+    print(paste("gridID", emp$gridID_alt, "have no data. Check before removing", sep = " "))
+    
+    print(
+      ggplot() +
+            geom_sf(data = emp) +
+            ggtitle("Sites with no data")
+      )
+    
+  } else{
+    print("All sites contain data.")
+  }
   
   for (i in unique(full_grid$gridID_alt)) {
        gridID = ifelse(full_grid$gridID_alt == i, 1, 0)
