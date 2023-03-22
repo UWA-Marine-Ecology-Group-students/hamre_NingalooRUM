@@ -170,7 +170,7 @@ dat <- dat %>%
 dat <- dat %>%
     mutate(numYear = as.numeric(format(SurveyDate,"%Y"))) %>% 
     mutate(facYear = as.factor(numYear)) %>% 
-    mutate(TripMonth = format(SurveyDate,"%B")) 
+    mutate(TripMonth = format(SurveyDate,"%b")) 
 
 # 1: 2015-07-21 - 2015-08-02
 # 2: 2015-09-23 - 2015-10-11

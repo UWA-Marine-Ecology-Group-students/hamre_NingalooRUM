@@ -1,0 +1,254 @@
+
+```{r}
+sz <- st_read("../data/gpkg/sz_edit.gpkg") %>% 
+      st_transform(crs = 4283) 
+  
+sz %<>% mutate(area =  as.numeric(round(set_units(st_area(sz), km^2), 2))) 
+  
+sz %<>% as.data.frame()
+
+shf <- st_read("../data/gpkg/shorefish_szid.gpkg") %>% 
+      st_transform(crs = 4283) %>% 
+  dplyr::select(-c("id", "fid_2")) %>% 
+  rename(id = id_2) %>% 
+  as.data.frame()
+
+shsz <- st_read("../data/gpkg/sz_shore.gpkg") %>% 
+      st_transform(crs = 4283) %>% 
+  as.data.frame()
+
+sz %<>% 
+  left_join(shsz[, c("id", "Shore_length")], by = "id") %>% 
+  left_join(shf[, c("id", "shfish.length")], by = "id") 
+ 
+sz %<>%  
+  mutate_at(c('Shore_length','shfish.length'), ~replace_na(.,0)) %>% 
+  mutate(shore = (Shore_length - shfish.length)/1000)
+```
+# plot 
+```{r}
+# mock data
+# sz <- c(1, 2, 3, 4, 5, 6, 7, 8)
+# area <- c(2.5, 5, 7, 9, 12, 10, 4, 6)
+# shore <- c(0, 1.5, 3, 4, 7, 2, 3, 2)
+# access <- c(1, 1, 2, 3, 4.5, 2, 2, 2.25)
+# tmp <- data.frame(sz, area, shore, access)
+
+sz$access <- round(runif(n = nrow(sz), min = 0, max = 5), 0)
+# sz$access <- 1
+
+## type 1
+ggplot(sz, aes(x = shore, y = area, size = access), ylim = 20) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.7) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.7) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.7) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.7)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+   geom_point(alpha = 0.7) +
+   # scale_size(range = c(5, 25), name = "Access") +
+   geom_text(label = sz$id, size = 3, colour = 'white') +
+   theme_classic() +
+   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) +
+   ylim(min = 0, max = max(sz$area) + 50) +
+   xlim(min = 0, max = max(sz$shore) + 5) +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+
+# type 2 
+ggplot(sz, aes(x = shore, y = area, size = access), ylim = 20) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.7) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.7) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.7) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.7)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+   geom_point(alpha = 0.7) +
+   # scale_size(range = c(5, 25), name = "Access") +
+   # geom_text(label = sz$id, size = 3, colour = 'white') +
+   theme_classic() +
+   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) +
+   ylim(min = 0, max = max(sz$area) + 50) +
+   xlim(min = 0, max = max(sz$shore) + 5) +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+
+#W tyep 3
+ggplot(sz, aes(x = shore, y = area, colour = as.factor(access)), ylim = 20) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.3) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.3) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.3) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.3)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+   geom_point() +
+   # scale_size(range = c(5, 25), name = "Access") +
+   # geom_text(label = sz$id, size = 3, colour = 'white') +
+   theme_classic() +
+   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) +
+   ylim(min = 0, max = max(sz$area) + 50) +
+   xlim(min = 0, max = max(sz$shore) + 5) +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+
+#W tyep 4
+ggplot(sz, aes(x = shore, y = area, colour = as.factor(access)), ylim = 20) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.3) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.3) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.3) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.3)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+   geom_point() +
+   # scale_size(range = c(5, 25), name = "Access") +
+   # geom_text(label = sz$id, size = 3, colour = 'white') +
+   theme_classic() +
+  scale_color_brewer(palette = "Blues")+
+   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) +
+   ylim(min = 0, max = max(sz$area) + 50) +
+   xlim(min = 0, max = max(sz$shore) + 5) +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+  
+# position=position_jitter(width=1, height=2) 
+```
+  
+  Attempt to make function
+```{r}
+# sz_status <- function(sz, # sf object of sanctuary zones
+#                       # shore_fish, # add in sf linestring of shore fishing zones
+#                       coast,
+#                       crs = 4283,
+#                       save = TRUE, # do you want to save sz_value plot
+#                       mp_name, # to be associated with saved plots
+#                       path = getwd(), # directory to save plots in
+#                       width = 7, # width of plots
+#                       height = 7) { # sf object of coast)
+#   
+  
+  # if (missing(sz) || missing(shore_fish)|| missing(coast)) {
+  #   stop("Missing at least one sf file at argument, sz, shore_fish, or coast")
+  # }
+  # 
+  # if (class(sz) != "sf" || class(shore_fish) != "sf"|| class(coast) != "sf") {
+  #   stop("sz, shore_fish,or coast is not an sf object. Change format to sf, see sf::st_as_sf()")
+  # } 
+  # 
+  #  if (missing(crs)) {
+  #   message("No specified crs; using default (crs = 4283)")
+  # } 
+  
+#   if (save == TRUE & missing(mp_name)) {
+#     stop("Saving with no mp_name; please give your marine park a name or change save to FALSE.")
+#   }
+#   
+#   if (save == TRUE & missing(path)) {
+#     message("Saving with no specified path; will save in current working directory.")
+#   }
+#   
+#   if (save == TRUE & missing(width) || save == TRUE & missing(height)) {
+#     message("Saving with no specified dimensions; saving with default dimensions (7 x 7)")
+#   }
+#   
+#   sz %<>% st_transform(crs)
+#   coast %<>% st_transform(crs)
+#   # shore_fish %<>% st_transform(crs)
+#   
+#   # sz_geom <- sz
+#   
+#   sz %<>% st_cast("POLYGON")
+#   #   mutate(area =  as.numeric(round(set_units(st_area(sz), km^2), 2)))
+#   # 
+#   # return(sz)
+#   # stop()
+#   
+#    # mp length
+#   # coast_buff <- st_buffer(coast, dist = 0.001) # buffer coast
+#   sz_coast <- st_intersection(sz, coast) # get intersection between coast and mp
+#   # sz_coast %<>% st_cast("LINESTRING")
+#   
+#   # return(sz_coast)
+#   # stop()
+#   
+#   sz_coast$length <- st_length(sz_coast) # calc length
+#   sz_coast$shore <- as.numeric(round(set_units(sz_coast$length, "km"), 2)) # ex
+#   
+#   sz_coast <- as.data.frame(sz_coast)
+#   
+#   return(sz_coast)
+#   stop()
+#   
+#   sz %<>%
+#     mutate(area =  as.numeric(round(set_units(st_area(sz), km^2), 2))) %>% 
+#     
+#     
+#     
+#     st_join(sz_coast[, c("id", "shore")], by = "id", left = TRUE)
+#     # mutate(shore = 0) %>% 
+#     # mutate(shore = as.numeric(round(set_units(sz_coast$length, "km"), 2)))
+#     # mutate(shore = round(as.numeric(st_length(st_intersection(sz, coast_buff))), 2))
+#   
+#   # 
+#   # return(sz)
+#   # stop()
+#   
+#   shore <- as.numeric(round(set_units(sz_coast$length, "km"), 2)) # extracting length
+#   
+#   # area 
+#   # area <- as.numeric(round(set_units(st_area(sz), km^2), 2)) # total area of mp
+#  
+#   
+#     print(
+#     ggplot() +
+#       geom_sf(data = coast, lwd = 0.25) +
+#       geom_sf(data = sz, lwd = 0.25) +
+#       geom_sf(data = sz_coast, color = "blue") +
+#       theme_classic() +
+#       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+#             legend.spacing.y = unit(0.75, "cm")) +
+#       ggtitle("Check beach access has been calculated correctly")
+#   )
+#     
+#     dat <- data.frame(sz)
+#     
+#     return(dat)
+# }
+# 
+# a <- sz_status(sz = sz, coast = coast, save = FALSE)
+# 
+# ggplot()+
+#   geom_sf(data = a)
+```
+

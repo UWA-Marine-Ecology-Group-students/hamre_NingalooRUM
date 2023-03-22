@@ -39,7 +39,21 @@
     #   st_transform(crs = 4283)
     
     coast <- st_read("./data/gpkg/coast.gpkg") %>% 
-      st_transform(crs = 4283)
+      st_transform(crs = 4283) %>% 
+      dplyr::select(geom) 
+    
+    hol <- read_csv("./data/RAW/Holidays.csv") %>%
+      mutate(Date = as.POSIXct(Date, format = "%d/%m/%y"))
+
+    consump <- read.csv("./data/RAW/consump.csv")
+    
+    vott <- read.csv("./data/RAW/VOTT.csv")
+    
+    # get fuel csv from here
+    # https://www.fuelwatch.wa.gov.au/retail/monthly
+    # need to resave as proper csv format
+    # jan - apr 2023
+    fuel <- read_csv("./data/RAW/Monthly-ULP-prices-Gascoyne-201507-202109.csv")
     
     # simulation
     sim_name <- "sim1"       #'[#NOTE: check simulation name]  
@@ -51,19 +65,28 @@
     source("./functions/spatialFunc.R") # spatial functions
     source("./functions/ascFunc.R") # function to make asc grid
     source("./functions/theme.R") # plot theme
+    source("./functions/genFunc.R") # function for smple weighting
     
     sf_use_s2(FALSE)
 ```
 
 ## Data prep
 
+```{r}
+fuel %<>%
+  mutate(TripMonth = gsub("[^a-zA-Z]", "", Month)) %>% 
+  mutate(numYear = as.numeric(paste0("20", as.numeric(gsub("[^0-9]", "", Month))))) %>% 
+  mutate(cost = Average/100)
+
+dat %<>% left_join(fuel[, c("TripMonth", "numYear", "cost")])
+```
+
 All data filters have to be done before making the choice set.
 
 ```{r}
     dat %<>% 
-  #'[#NOTE check all filters have been applied to data eg. activity type, site type and site]
-  
-      filter(ActivityType == "Extractive" & SiteType == "Boat" & str_detect(Site, 'BR')) %>% # filtering activity
+      filter(ActivityType == "Extractive") %>% # filtering activity
+      filter(str_detect(Site, "BR")) %>% 
       filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
       st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)  ## make sf object
       
@@ -72,11 +95,64 @@ All data filters have to be done before making the choice set.
       group_by(PersonID, TripID) %>% 
       slice(which.max(decDuration)) %>% 
       ungroup() 
-      
+    
       dat <- st_crop(dat, grid_base) # removing outliers 
     
       #'[#VALIDATE: TRUE, no duplicated trip IDs)]
       identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
+      
+      dat %<>%
+        filter(!is.na(BoatLength))
+```
+
+
+```{r}
+    # for getting survey weights
+    dat <- dat %>%
+      mutate(SurveyDate_posix = as.POSIXct(SurveyDate, format = "%m/%d/%Y %H:%M:%S") +
+               8*60*60) %>%
+      mutate(Time = format(SurveyDate_posix, "%p")) %>%
+      mutate(DayType = weekdays(SurveyDate_posix, abbreviate = TRUE)) %>%
+      mutate(DayType = ifelse(DayType %in% c("Sat", "Sun"), "Weekend", "Weekday")) %>%
+      mutate(SurveyDate_posix = as.POSIXct(SurveyDate, format = "%m/%d/%Y")) %>%
+      mutate(Hol = ifelse(SurveyDate_posix %in% hol$Date, hol$Holiday, NA)) %>%
+      mutate(DayType = ifelse(Hol %in% "public", "Weekend", DayType)) %>%
+      mutate(Hol = ifelse(Hol %in% "school", 1, 0)) %>%
+      unite("psuid", c(SurveyDate_posix, Time), remove = F, sep = " ")
+
+    
+    # # calculating even weights
+    # dat <- even_weights(df = dat, psuid = psuid, w_col = "Time")
+    dat <- even_weights(df = dat, psuid = psuid, w_col = "Site")
+
+    # calculate uneven weights
+    # Holidays
+    dny <- (n_distinct(dat$facYear)*365)
+    nhol <- hol %>% filter(Holiday == "school")  %>% nrow()
+    w_hol1 = nhol/dny
+    w_hol0 = (dny - nhol)/dny
+
+    ## checkpoint: == 1
+    w_hol1 + w_hol0
+
+    # append
+    dat %<>% mutate(w_hol = ifelse(Hol %in% 1, w_hol1, w_hol0))
+
+    # DayType
+    wdat <- dat %>% distinct(psuid, .keep_all = TRUE)
+    daytype_smpl <- as.data.frame(table(wdat$DayType)) %>%
+      mutate(w = ifelse(Var1 %in% "Weekend", Freq/(2*52), Freq/(5*52))) %>%
+      mutate(w_daytype = w/sum(w)) %>% # scaling
+      rename(DayType = Var1)
+
+    ## checkpoint: == 1
+    sum(daytype_smpl$w_daytype)
+
+    # append
+    dat %<>% left_join(daytype_smpl[, c("DayType", "w_daytype")])
+
+    # overall weight
+    dat %<>% mutate(smpl_w = w_Site*w_hol*w_daytype)
 ```
 
 ## ASC grid and simulation stats
@@ -92,19 +168,6 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
 #'[#NOTE:Check empty grids before removing]  
   emp <- grid[which(grid$data_present == FALSE),]
   grid %<>% filter(gridID_alt != emp$gridID_alt) 
-```
-
-```{r}
-# no new mp boundary to to run this
-# sim_stats
-    # sim_stats <- sim_stats(ascGrid = grid, point = dat, mp = mp, coast = coast, crs = 4283, sim_name = sim_name, path = "./plots/ASC RUM", width = 8, height = 11)
-    # sim_stats
-    
-# mp_stats
-    # mp_name <- "marmion"
-    # mp_old <- st_read("./data/gpkg/mar_oldextent.gpkg") %>% st_transform(crs = 4283)
-    # mp_stats <- mp_stats(ascGrid = grid, point = dat, mp = mp_old, coast = coast, crs = 4283, mp_name = "marmion", path = "./plots/ASC RUM", width = 8, height = 11)
-    # write_csv(mp_stats, paste0("./plots/ASC RUM/", mp_name,"_stats.csv"))
 ```
 
 ## Attributes

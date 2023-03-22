@@ -31,21 +31,21 @@ ASCgrid <- function(poly, #  sf polygon to split
                     by, # incrementally distance increase to iterate over, same units as crs
                     vert = FALSE, # make line orientation perpendicular to lines in poly
                     crs # vertical or horizontal divisions
-                    ) { # height if plots
+) { # height if plots
   
- if (missing(poly) || missing(sz_sim) || missing(point)) {
+  if (missing(poly) || missing(sz_sim) || missing(point)) {
     stop("Missing at least one sf file at argument, poly, ntz or point")
   }
-
+  
   if (class(poly) != "sf" || class(sz_sim) != "sf" || class(sz_current) != "sf" || class(point) != "sf" ) {
-  stop("poly, ntz or point is not an sf object. Change format to sf, see sf::st_as_sf()")
+    stop("poly, ntz or point is not an sf object. Change format to sf, see sf::st_as_sf()")
   } 
   
   #'[#TODO: add in ifelse statement so you can run scenarios where there are no current sz] 
   # if (missing(sz_current)) {
   #   stop("Missing sz_current, continuing assuming there no current sz")
   # }
-
+  
   # make crs for every sf object the same 
   poly %<>% st_transform(crs) %>% st_make_valid()
   # ntz %<>% st_transform(crs)
@@ -87,9 +87,9 @@ ASCgrid <- function(poly, #  sf polygon to split
   
   sim_holes_geom <- st_as_sf(sim_holes$geom)
   npz_geom <- st_as_sf(sz_current$geom)
-
+  
   ntz_geom <- rbind(sim_holes_geom, npz_geom)
-
+  
   ntz <- cbind(ntz, ntz_geom) %>% 
     dplyr::select(-geom) %>%
     rename(geom = x) %>% 
@@ -114,14 +114,14 @@ ASCgrid <- function(poly, #  sf polygon to split
   #   dplyr::select(-geom) %>%
   #   rename(geom = x)
   
- # count number of uses in each site   
- ntz$use_count <- lengths(st_intersects(ntz, point))
-
- # identify sz with and without data/recreational value  
- ntz %<>%
-   mutate(sz_value = ifelse(use_count > 0, 1, 0)) %>% 
-   mutate(sz = ifelse(sz_current %in% 1, 1, sz)) %>% 
-   mutate(id = row_number())
+  # count number of uses in each site   
+  ntz$use_count <- lengths(st_intersects(ntz, point))
+  
+  # identify sz with and without data/recreational value  
+  ntz %<>%
+    mutate(sz_value = ifelse(use_count > 0, 1, 0)) %>% 
+    mutate(sz = ifelse(sz_current %in% 1, 1, sz)) %>% 
+    mutate(id = row_number())
   
   # cutting ntz out of polygon to make grid in
   poly_w_ntz <- st_difference(st_make_valid(poly), st_union(st_combine(ntz))) # crops ntz out of grid
@@ -186,7 +186,7 @@ ASCgrid <- function(poly, #  sf polygon to split
           print(paste(i, "Grid", sep = " "))
           break
         }
-
+        
       }
     }
     acGrids %<>% rbind(grid)
@@ -203,7 +203,7 @@ ASCgrid <- function(poly, #  sf polygon to split
   
   full_grid <- full_join(grid, ntz) %>%
     mutate_if(is.numeric, ~replace_na(., 0))
-
+  
   full_grid <- cbind(full_grid, full_geom) %>%
     st_as_sf() %>%
     dplyr::select(-geom) %>%
@@ -213,6 +213,7 @@ ASCgrid <- function(poly, #  sf polygon to split
     mutate(sz_value = ifelse(sz == 0, NA, sz_value)) %>% 
     mutate(sz_type = ifelse(sz_current %in% 1 & sz %in% 1, "Current",
                             ifelse(sz_current %in% 0 & sz %in% 1, "Simulated", NA)))
+  
   
   # merging geometries that have no data becayuse of base_grid and szs defined
   st_rook = function(a, b = a) st_relate(a, b, pattern = "F***1****") # find neighbour (nb) function
@@ -227,21 +228,24 @@ ASCgrid <- function(poly, #  sf polygon to split
   merge_to <- full_grid %>% filter(gridID_alt %in% grid0_nb_list, data_present == TRUE) 
   merge_to_id <- as.character(unique(merge_to$gridID_alt))
   
-  temp_grid %<>%
-    mutate(merge_to = ifelse(str_detect(grid_nb, merge_to_id), merge_to_id, 0)) %>% # ids all rows nb with merge_to
-    mutate(merge_to = ifelse(merge_to > 0 & data_present == TRUE | merge_to > 0 & sz == 1, 
-                             0, merge_to)) %>%  # selects only the nbs to be merged
-    mutate(gridID_alt = ifelse(merge_to > 0, merge_to, gridID_alt)) %>% 
-    group_by(gridID_alt) %>% 
-    summarise()
-  
-  # turn into dfs and left join
-  full_grid %<>% as.data.frame() %>% dplyr::select(-geom)
-  temp_grid %<>% 
-    mutate(gridID_alt = as.numeric(gridID_alt)) %>% 
-    rename(geometry = geom) %>% 
-    as.data.frame()
-  full_grid <- left_join(temp_grid, full_grid, by = "gridID_alt") %>% st_as_sf()
+  if (nrow(merge_to) != 0) {
+    temp_grid %<>%
+      mutate(merge_to = ifelse(str_detect(grid_nb, merge_to_id), merge_to_id, 0)) %>% # ids all rows nb with merge_to
+      mutate(merge_to = ifelse(merge_to > 0 & data_present == TRUE | merge_to > 0 & sz == 1, 
+                               0, merge_to)) %>%  # selects only the nbs to be merged
+      mutate(gridID_alt = ifelse(merge_to > 0, merge_to, gridID_alt)) %>% 
+      group_by(gridID_alt) %>% 
+      summarise()
+    
+    # turn into dfs and left join
+    full_grid %<>% as.data.frame() %>% dplyr::select(-geom)
+    temp_grid %<>% 
+      mutate(gridID_alt = as.numeric(gridID_alt)) %>% 
+      rename(geometry = geom) %>% 
+      as.data.frame()
+    full_grid <- left_join(temp_grid, full_grid, by = "gridID_alt") %>% st_as_sf()
+    
+  }
   
   full_grid$area <- as.numeric(round(set_units(st_area(full_grid), km^2), 2))
   full_grid$use_count <- lengths(st_intersects(full_grid, point))
@@ -254,18 +258,18 @@ ASCgrid <- function(poly, #  sf polygon to split
     
     print(
       ggplot() +
-            geom_sf(data = emp) +
-            ggtitle("Sites with no data")
-      )
+        geom_sf(data = emp) +
+        ggtitle("Sites with no data")
+    )
     
   } else{
     print("All sites contain data.")
   }
   
   for (i in unique(full_grid$gridID_alt)) {
-       gridID = ifelse(full_grid$gridID_alt == i, 1, 0)
-       full_grid[,length(full_grid) + 1] <- gridID
-       colnames(full_grid)[ncol(full_grid)] <- paste0("gridID_", i)
+    gridID = ifelse(full_grid$gridID_alt == i, 1, 0)
+    full_grid[,length(full_grid) + 1] <- gridID
+    colnames(full_grid)[ncol(full_grid)] <- paste0("gridID_", i)
   }
   
   print(
@@ -602,7 +606,7 @@ ascAtt <- function(ascGrid, # sf object of ascGrid (make sure geometry is called
   #   mutate(br_lat = st_coordinates(.)[,2]) %>% 
   #   mutate(br_geom = paste0(br_lon, br_lat)) %>% 
   #   dplyr::select(-c(br_lon, br_lat))
-
+  
   grid_id_name <- grid_id # value which is name of columns
   grid_id_vis <- ascGrid[,which(names(ascGrid) == grid_id)]
   grid_id <- ascGrid[,which(names(ascGrid) == grid_id)] %>% st_drop_geometry()# the col
@@ -610,7 +614,7 @@ ascAtt <- function(ascGrid, # sf object of ascGrid (make sure geometry is called
   ascGrid %<>% st_transform(crs = crs)
   point %<>% st_transform(crs = crs)
   br %<>% st_transform(crs = crs)
-
+  
   centroid <- st_centroid_within_poly(ascGrid) # gets centroid of every ascGrid cell
   ascGrid$centroid <- centroid$geom # appending centroid
   
@@ -625,7 +629,7 @@ ascAtt <- function(ascGrid, # sf object of ascGrid (make sure geometry is called
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
             legend.spacing.y = unit(0.75, "cm"))
   )
-
+  
   # get distance from each ramp to the centroid of the sites
   dist <- as.data.frame(round(set_units(st_distance(ascGrid$centroid, br), km), 2)) # calc dist (km)
   names(dist) <- pull(br_id[,1] %>% st_drop_geometry()) # extract ramp ids
@@ -655,7 +659,7 @@ ascAtt <- function(ascGrid, # sf object of ascGrid (make sure geometry is called
   
   return(ascGrid)
   stop()
-
+  
   #'[#TODO:Need to join br_geom to point so I can have a common var to join with at expansion.]  
   
   # allocating sites to grids
@@ -680,7 +684,7 @@ ascAtt <- function(ascGrid, # sf object of ascGrid (make sure geometry is called
   # t1 <- nrow(point)
   
   # point <- inner_join(point, ascGrid, by = br_id_name) # FALSE
- 
+  
   # validation: testing expansion
   # if (t1*nrow(grid_id) != nrow(point)) {
   #   warning("Incorrect expansion: number of trips * number of sites != nrow(point)")
@@ -690,5 +694,5 @@ ascAtt <- function(ascGrid, # sf object of ascGrid (make sure geometry is called
   
   # print(ascGrid)
   # return(point)
-
+  
 }
