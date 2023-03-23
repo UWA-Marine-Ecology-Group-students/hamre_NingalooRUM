@@ -1,3 +1,19 @@
+```{r}
+ library(tidyverse)
+    library(dplyr)
+    library(ggplot2)
+    library(sp)
+    library(raster)
+    library(rgeos)
+    library(rgdal)
+    library(sf)
+    library(lwgeom)
+    library(googledrive)
+    library(units)
+    library(nngeo)
+    library(magrittr)
+    library(todor)
+```
 
 ```{r}
 sz <- st_read("../data/gpkg/sz_edit.gpkg") %>% 
@@ -8,14 +24,16 @@ sz %<>% mutate(area =  as.numeric(round(set_units(st_area(sz), km^2), 2)))
 sz %<>% as.data.frame()
 
 shf <- st_read("../data/gpkg/shorefish_szid.gpkg") %>% 
-      st_transform(crs = 4283) %>% 
-  dplyr::select(-c("id", "fid_2")) %>% 
-  rename(id = id_2) %>% 
-  as.data.frame()
+   st_transform(crs = 4283) %>% 
+   dplyr::select(-c("id", "fid_2")) %>% 
+   rename(id = id_2) %>% 
+   as.data.frame() %>% 
+   group_by(id) %>% 
+   summarise(shfish.length = sum(shfish.length))
 
 shsz <- st_read("../data/gpkg/sz_shore.gpkg") %>% 
       st_transform(crs = 4283) %>% 
-  as.data.frame()
+      as.data.frame()
 
 sz %<>% 
   left_join(shsz[, c("id", "Shore_length")], by = "id") %>% 
@@ -23,7 +41,12 @@ sz %<>%
  
 sz %<>%  
   mutate_at(c('Shore_length','shfish.length'), ~replace_na(.,0)) %>% 
-  mutate(shore = (Shore_length - shfish.length)/1000)
+  mutate(shore = (Shore_length - shfish.length)/1000) %>% 
+   dplyr::select(-geom)
+
+access <- read_csv("../data/RAW/sz_access.csv")
+
+sz %<>% left_join(access[, c("id", "access")], by = "id")
 ```
 # plot 
 ```{r}
@@ -34,117 +57,203 @@ sz %<>%
 # access <- c(1, 1, 2, 3, 4.5, 2, 2, 2.25)
 # tmp <- data.frame(sz, area, shore, access)
 
-sz$access <- round(runif(n = nrow(sz), min = 0, max = 5), 0)
-# sz$access <- 1
-
-## type 1
-ggplot(sz, aes(x = shore, y = area, size = access), ylim = 20) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
-               fill = "red", alpha = 0.7) + 
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
-               fill= "yellow", alpha = 0.7) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
-               fill= "orange", alpha = 0.7) +
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
-               fill = "green", alpha = 0.7)  +
-   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
-   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
-   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
-  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
-   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
-   geom_point(alpha = 0.7) +
-   # scale_size(range = c(5, 25), name = "Access") +
-   geom_text(label = sz$id, size = 3, colour = 'white') +
-   theme_classic() +
-   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
-         legend.box = "horizontal",
-         legend.title.align = 0.5) +
-   ylim(min = 0, max = max(sz$area) + 50) +
-   xlim(min = 0, max = max(sz$shore) + 5) +
-  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
-
-# type 2 
-ggplot(sz, aes(x = shore, y = area, size = access), ylim = 20) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
-               fill = "red", alpha = 0.7) + 
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
-               fill= "yellow", alpha = 0.7) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
-               fill= "orange", alpha = 0.7) +
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
-               fill = "green", alpha = 0.7)  +
-   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
-   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
-   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
-  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
-   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
-   geom_point(alpha = 0.7) +
-   # scale_size(range = c(5, 25), name = "Access") +
-   # geom_text(label = sz$id, size = 3, colour = 'white') +
-   theme_classic() +
-   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
-         legend.box = "horizontal",
-         legend.title.align = 0.5) +
-   ylim(min = 0, max = max(sz$area) + 50) +
-   xlim(min = 0, max = max(sz$shore) + 5) +
-  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
-
-#W tyep 3
-ggplot(sz, aes(x = shore, y = area, colour = as.factor(access)), ylim = 20) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
-               fill = "red", alpha = 0.3) + 
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
-               fill= "yellow", alpha = 0.3) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
-               fill= "orange", alpha = 0.3) +
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
-               fill = "green", alpha = 0.3)  +
-   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
-   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
-   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
-  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
-   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
-   geom_point() +
-   # scale_size(range = c(5, 25), name = "Access") +
-   # geom_text(label = sz$id, size = 3, colour = 'white') +
-   theme_classic() +
-   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
-         legend.box = "horizontal",
-         legend.title.align = 0.5) +
-   ylim(min = 0, max = max(sz$area) + 50) +
-   xlim(min = 0, max = max(sz$shore) + 5) +
-  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
-
-#W tyep 4
-ggplot(sz, aes(x = shore, y = area, colour = as.factor(access)), ylim = 20) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
-               fill = "red", alpha = 0.3) + 
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
-               fill= "yellow", alpha = 0.3) +
-      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
-               fill= "orange", alpha = 0.3) +
-      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
-               fill = "green", alpha = 0.3)  +
-   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
-   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
-   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
-  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
-   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
-   geom_point() +
-   # scale_size(range = c(5, 25), name = "Access") +
-   # geom_text(label = sz$id, size = 3, colour = 'white') +
-   theme_classic() +
-  scale_color_brewer(palette = "Blues")+
-   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
-         legend.box = "horizontal",
-         legend.title.align = 0.5) +
-   ylim(min = 0, max = max(sz$area) + 50) +
-   xlim(min = 0, max = max(sz$shore) + 5) +
-  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+# sz$access <- round(runif(n = nrow(sz), min = 0, max = 5), 0)
+# # sz$access <- 1
+# 
+# ## type 1
+# ggplot(sz, aes(x = shore, y = area, size = access), ylim = 20) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+#                fill = "red", alpha = 0.7) + 
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+#                fill= "yellow", alpha = 0.7) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+#                fill= "orange", alpha = 0.7) +
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+#                fill = "green", alpha = 0.7)  +
+#    geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+#    geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+#    annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+#   # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+#    # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+#    geom_point(alpha = 0.7) +
+#    # scale_size(range = c(5, 25), name = "Access") +
+#    geom_text(label = sz$id, size = 3, colour = 'white') +
+#    theme_classic() +
+#    theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+#          legend.box = "horizontal",
+#          legend.title.align = 0.5) +
+#    ylim(min = 0, max = max(sz$area) + 50) +
+#    xlim(min = 0, max = max(sz$shore) + 5) +
+#   labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+# 
+# # type 2 
+# ggplot(sz, aes(x = shore, y = area, size = access), ylim = 20) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+#                fill = "red", alpha = 0.7) + 
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+#                fill= "yellow", alpha = 0.7) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+#                fill= "orange", alpha = 0.7) +
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+#                fill = "green", alpha = 0.7)  +
+#    geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+#    geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+#    annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+#   # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+#    # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+#    geom_point(alpha = 0.7) +
+#    # scale_size(range = c(5, 25), name = "Access") +
+#    # geom_text(label = sz$id, size = 3, colour = 'white') +
+#    theme_classic() +
+#    theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+#          legend.box = "horizontal",
+#          legend.title.align = 0.5) +
+#    ylim(min = 0, max = max(sz$area) + 50) +
+#    xlim(min = 0, max = max(sz$shore) + 5) +
+#   labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+# 
+# #W tyep 3
+# ggplot(sz, aes(x = shore, y = area, colour = as.factor(access)), ylim = 20) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+#                fill = "red", alpha = 0.3) + 
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+#                fill= "yellow", alpha = 0.3) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+#                fill= "orange", alpha = 0.3) +
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+#                fill = "green", alpha = 0.3)  +
+#    geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+#    geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+#    annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+#   # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+#    # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+#    geom_point() +
+#    # scale_size(range = c(5, 25), name = "Access") +
+#    # geom_text(label = sz$id, size = 3, colour = 'white') +
+#    theme_classic() +
+#    theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+#          legend.box = "horizontal",
+#          legend.title.align = 0.5) +
+#    ylim(min = 0, max = max(sz$area) + 50) +
+#    xlim(min = 0, max = max(sz$shore) + 5) +
+#   labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+# 
+# #W tyep 4
+# ggplot(sz, aes(x = shore, y = area, colour = as.factor(access)), ylim = 20) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+#                fill = "red", alpha = 0.3) + 
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+#                fill= "yellow", alpha = 0.3) +
+#       annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+#                fill= "orange", alpha = 0.3) +
+#       annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+#                fill = "green", alpha = 0.3)  +
+#    geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+#    geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+#    annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+#   # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+#    # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+#    geom_point() +
+#    # scale_size(range = c(5, 25), name = "Access") +
+#    # geom_text(label = sz$id, size = 3, colour = 'white') +
+#    theme_classic() +
+#   scale_color_brewer(palette = "Blues")+
+#    theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+#          legend.box = "horizontal",
+#          legend.title.align = 0.5) +
+#    ylim(min = 0, max = max(sz$area) + 50) +
+#    xlim(min = 0, max = max(sz$shore) + 5) +
+#   labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
   
 # position=position_jitter(width=1, height=2) 
 ```
-  
+
+```{r}
+# full ploy
+ggplot(sz, xmin = 0, ymin = 0, ylim = 20) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.3) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.3) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.3) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.3)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+   annotate("text", x = 20, y = 20, label = "world class standard", colour = "red") +
+  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+   geom_point(aes(x = shore, y = area, fill = as.factor(access)), size =7, alpha = 0.5, shape = 21, colour = 'black') +
+   # scale_size(range = c(5, 25), name = "Access") +
+   # geom_text(label = sz$id, size = 3, colour = 'white') +
+   theme_classic() +
+  scale_fill_brewer(palette = "Blues", name = "Human Connection\n Potential") +
+   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) +
+   ylim(min = 0, max = max(sz$area) + 50) +
+   xlim(min = 0, max = max(sz$shore) + 5) +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)")
+  # scale_x_continuous(expand = c(0, 0), limits = c(0, NA)) +
+  # scale_y_continuous(expand = c(0, 0), limits = c(0, NA))
+
+# cropped plot
+sz2 <- sz %>% filter(shore <= 15, area <= 15)
+
+ggplot(sz2) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.3) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.3) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.3) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.3)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+   # annotate("text", x = 9.5, y = 10, label = "world class standard", colour = "red") +
+  # annotate("text", x = 4.75, y = 8, label="world class standard", angle = 90) +
+   # geom_point(alpha = 0.7, aes(colour = as.factor(sz))) +
+   geom_point(aes(x = shore, y = area, fill = as.factor(access)), size = 6, alpha = 0.5, shape = 21, colour = 'black') +
+   # scale_size(range = c(5, 25), name = "Access") +
+   # geom_text(label = sz$id, size = 3, colour = 'white') +
+   theme_classic() +
+   scale_fill_brewer(palette = "Blues", name = "Human Connection\n Potential") +
+   theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) +
+   geom_text(data = subset(sz2, Name  %in% c("Mandu SZ", "Mangrove SZ")),
+            aes(x = shore, y = area, label = Name), nudge_y = 1) +
+   # ylim(min = 0, max = 100) +
+   # xlim(min = 0, max = 15) +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)") +
+  scale_x_continuous(expand = c(0, 0), limits = c(0, 15)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 15))
+```
+ 
+```{r}
+ggplot(sz2) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = -Inf, ymax = 4.5 , 
+               fill = "red", alpha = 0.3) + 
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = -Inf, ymax = 4.5, 
+               fill= "yellow", alpha = 0.3) +
+      annotate("rect", xmin = -Inf, xmax = 4.5, ymin = 4.5, ymax = Inf, 
+               fill= "orange", alpha = 0.3) +
+      annotate("rect", xmin = 4.5, xmax = Inf, ymin = 4.5, ymax = Inf, 
+               fill = "green", alpha = 0.3)  +
+   geom_vline(xintercept = 4.5, color = 'red', linetype = "dashed") + 
+   geom_hline(yintercept = 4.5, color = 'red', linetype = "dashed") +
+  theme_classic() +
+  labs(y = bquote('Area'~(km^2)), x = "Shore access (km)") +
+  scale_x_continuous(expand = c(0, 0), limits = c(0, 15)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 15)) +
+      theme(plot.margin = margin(1,1,1.5,1.2, "cm"),
+         legend.box = "horizontal",
+         legend.title.align = 0.5) 
+```
+ 
+ 
   Attempt to make function
 ```{r}
 # sz_status <- function(sz, # sf object of sanctuary zones

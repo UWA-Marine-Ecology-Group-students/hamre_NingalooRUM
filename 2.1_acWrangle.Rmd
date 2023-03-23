@@ -103,6 +103,9 @@ All data filters have to be done before making the choice set.
       
       dat %<>%
         filter(!is.na(BoatLength))
+      
+      ggplot()+
+        geom_sf(data = dat)
 ```
 
 
