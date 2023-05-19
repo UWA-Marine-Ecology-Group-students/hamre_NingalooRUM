@@ -671,6 +671,7 @@ habitat_area <- function(sf_habitat, col_habitat, sf_grid, id_grid){ #id_grid is
     dplyr::group_by(!!ID) %>%
     dplyr::summarise_at(habitats, .funs = sum) %>%
     dplyr::ungroup() %>%
+    mutate(ID = as.character(ID))
     st_drop_geometry()
   sf_grid %>% left_join(habitat_grid, by = ID)
 }

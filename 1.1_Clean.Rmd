@@ -10,7 +10,7 @@ library(ggplot2)
 library(magrittr)
 
 # functions
-source("./functions/cleaningFunc.R") # spatial functions
+source("./functions/genFunc.R") # spatial functions
 
 # data
 dat <- read.csv("./data/RAW/RAW.csv")
@@ -294,7 +294,10 @@ dat <- dat %>%
 # Start and Stop
 dat <- dat %>%
   mutate(Start = ifelse(!is.na(exStart), exStart, nexStart)) %>%
-  mutate(Stop = ifelse(!is.na(exStop), exStop, nexStop))
+  mutate(Stop = ifelse(!is.na(exStop), exStop, nexStop)) 
+
+dat <- dat %>% 
+  mutate(Start_hr = as.numeric(substr(Start, 1, 2)))
 ```
 
 Time calculations
@@ -1125,18 +1128,46 @@ dat <- dat %>%
                                      |Mahi|bludger|Wahoo|Waco"), 1, NA)) %>%
   mutate(Flatheads_Cobblers = ifelse(str_detect(Species, "Cobbler|Flathead|Flatty|catfish|Northern flathead|Sandbar flathead"), 1, NA)) %>%
   mutate(Pigfish_Tuskfish_Parrotfish = ifelse(str_detect(Species, "blue bone|black spot|parrot|vine"), 1, NA)) %>%
-  mutate(Cephalopods_Crustaceans = ifelse(str_detect(Species, "Squid|squid|Squids|squids|Prawn|prawn|Prawns|prawns"), 1, NA)) %>%
-  mutate(Others = ifelse(str_detect(Species, "Blowfish|Blowly|northwest|Damsel|Leather jacket|Lizard fish|Shark|Whalers"), 1, NA)) %>%
-  relocate(Emperors, .after=Species) %>%
-  relocate(Snappers, .after=Emperors) %>%
-  relocate(Breams, .after=Snappers) %>%
-  relocate(Cods_Trouts_Groupers, .after=Breams) %>%
-  relocate(Perch, .after=Cods_Trouts_Groupers) %>%
-  relocate(Pelagic, .after=Perch) %>%
-  relocate(Flatheads_Cobblers, .after=Pelagic) %>%
-  relocate(Pigfish_Tuskfish_Parrotfish, .after=Flatheads_Cobblers) %>%
-  relocate(Cephalopods_Crustaceans, .after=Pigfish_Tuskfish_Parrotfish) %>%
-  relocate(Others, .after=Cephalopods_Crustaceans)
+  mutate(Cephalopods_Crustaceans = ifelse(str_detect(Species, "Squid|squid|Squids|squids|Prawn|prawn|Prawns|prawns"), 1, NA))
+
+# dat2 <- dat %>% 
+#   mutate(Dem = ifelse(Emperors %in% 1, 1, 0)) %>% 
+#   mutate(Dem = ifelse(Perch %in% 1, 1, Dem)) %>% 
+#   mutate(Dem = ifelse(str_detect(Species, "rock cod|rockcod|coral|Coral|honeycomb|Honeycomb|rankin|Coronation|coronation|nanny|cod|Cod|Cud’s|Rims on|
+#                                  Red throat|Ruby|Goldband|goldband|Goldban|Gold band||Golden band|gold and|Red snapper|Spainish|Robinson's|seabream|Seabream|Pink bream|blue bone|black spot|vine|"), 1, Dem)) 
+#   mutate(nrSh = ifelse(Flatheads_Cobblers %in% 1, 1, 0)) %>% 
+#   mutate(nrSh = ifelse(str_detect(Species, "estuarine cod|Charlie|charlie|sweetlips|Chinaman|chinamen|chinaman|Flag|flags|Mangrove|mangrove|Jack|jack|Striped sea|stripey sera|thredfin|threadfin|Leather jacket"), 1, nrSh)) %>% 
+#   mutate(crust = ifelse(str_detect(Species, "Prawn|prawn|Prawns|prawns"), 1, 0)) %>% 
+#   mutate(moll = ifelse(str_detect(Species, "Squid|squid|Squids|squids"), 1, 0)) %>% 
+#   rename(Pel = Pelagic) %>% 
+#   mutate(Pel = ifelse(str_detect(Species, "Shark|Whalers"), 1, Pel))
+  
+  dat <- dat %>% mutate(Dem = ifelse(Species %in% c("Perch", "Snapper and coral trout", "Spangled emperor, cod", "Black snapper", "Mackerel 3 so, trevallu, spangled emp", "Brim and blue bone and trevally", "Red emperor, Kobe, golbands", "Cobia, spangled emp", "Spangled emperor", "Grassy emp.", "Spangled, stripes perch, bream", "Spangled emperor, spainish mackrel, spainish emperor", "Rock cod", "Snappy, charlie", "Honeycomb cod, red spot cod, empowers red throat ", "Emperor ", "Emperors ", "Spangled emp, coral trout ", "Snapper", "Coral trout, cod", "Spangos, 1 cod, 1 red emperor, 1 snapper, 1 rosie", "Cod, cobia", "Cod", "Spangled emp, ", "Chinaman, red throat emperors, spangled, rock cod", "Spanish Mac,real , red cod ", "Cod, snapper ", "Rock code, spangled emp", "Spangos x2 and a threadfin", "Red snapper", "Long nose emporer", "1 spangled emperor; 1 threadfin ", "Cobbler, released. Black spot, trevally ", "Emporer", "Blue lines emp, cod ", "Coral trout", "Snapper, reef shark released, small fish", "Spangled emp, red throat", "Cod, blue vine,", "Emperor", " Rims on sea perch, blue lined emp, released cod ", "Stripy sera perch sea perch dhufosh", "Spanish flags ", "Pink bream and spangled emp", "Cud’s", "Stripy, Spanish flag, potato cod", "Bluebone", "Spango 2 trevally 4", "Long fin red throat, honeycomb cod", "Mackerel, tuna, slang emperor", "Flag, mackerel ", "Cobia", "Obie", "Spangled emp", "Gold band, ruby, gold perch ", "Spangled p", "Red throat", "Coronation trout", "Coronation trout, cobia, black snapper", "Rankin cod, spangled emp, coral trout", "Gold band, nanny gyr, trevally", "Cod is, yellow spotted rock cod, tuna, spangled emp", "Rainbow coral trout", "Spangled emperor ", "Long tongs, trevally, cods", "Spangled, charley, cod", "Queenie ", "Golden trevally, queen fish, gianttrevally, spangled emperor", "Break", "Red emperor, cobia, blue line emperor", "Cod, perch, coral trout, snappers (blue line, spangled), trevally", "Spangled, striped emperor, cod, Charlie", "Spangled emperor, rankin cod, trevally", "variegated emperor, red throat emperor, Spanish flag", "Gold band snapper sea bream emperor", "Snappers (blue line, spangled)", "Spangled trevally mangrove jack red lipped emperor", "Coral trout, rankin, spangled emperor, honeycomb comb", "Spangled", "Ruby snapper", "Queenie", "charlie, blue line emperor, 1 unknown", "Spangled emperor, red emperor, black tip reef shark", "Charlie’s, red throat snapper, blue line snapper", "Gold and, pearl perch, Robinson sea bream, ruby", "Yellowfin, Waco, coronation cod","Goldban", "Ruby", "Spangled emp, Charlie’s", "Blue lined emp, Charlie", "Honey cod, red snapper (bronzes and reefs around)", "Spanish mackrel, blue band snapper, spangled ", "Charlie, blue lined emp", "Coral trout, blue bone, spangly", "Rankin cod, spangled emp, blue lined emp", "Gold and snapper", "Mackerel, rNming cod, jog", "Grey school Mackie, Spanish Mackie, gt ,yellow striped snapper ,blue spot snapper, snook", "Morwong", "Span mackerel,  oral trout", "Bluey, trout", "Grassy, emperor", "Spangler, squid", "Spangled released cods", "Red throats, coral trout all undersized China men cod", "Mangrove jerk, cobia, spangled emperor, trivali, wrass", "Spangled, squid", "Tusk, blue bone, Charlie caught", "Cray, Spanish flag ", "Red trout emper, Moses fish", "6 squid, 2 cod, 1 spangly",  "Spanish mackerel, ", "Spot cod, coral trout , spangled emperor ", "Coral trout gold spotted cod", "Sweet lips, coral Troughton", "Sweetlip, coral trout", "Snapper, stripes ", "Striped something", "Blue bone", "Yellow stripe snapper, flathead, ", "Coronation trout, ", "3 squid, 2 red throat emperor", "Red emperor", "Spanish, mackerel, spangled sgark mackerel", "Blue lined emperor", "Spangly ", "Cod black spotted", "Gold and, blowie, Garfield", "Gold and", "Gold and 8,", "Cobia, spangled emperor, cod ", "Gold band, ",  "Gold band, crimson ", "Mackerel, coronation trout, shark", "Qyeenies , got, swallow dart", "Fingermark 2,  blue lined,", "Trou, blue bone ", "2 rankings, spang emperor, red emperor"), 1, 0)) %>% 
+    
+    # error in one dem chunk
+     mutate(Dem_bin = ifelse(Species %in% c("Blue lined empowers, parrot fish released", "Spangled, tomato cod", "Blue emperor", "Goldband, rankin cod, ", "Trout, mackerel", "3 trout, 2 bluey, 1 cod", "Yellow fin th a, cobia, fingermark, cod , gold spot cod , trevally, Charlie courts ", "3 red throat emperor, 1", "Morwong, wrasse", "Blue line, blue empower", "Shark, toddler, snapper, blue bones", "Cod, reef fish", "Saddle tail, Spanish flag", "Trout", "Spanish flag, school Mack 2, spotted Mack"), 1, Dem)) %>% 
+    
+    
+    mutate(nrSh_bin = ifelse(Species %in% c("Flatty, catfish?", "Flatty", "Mangrove jack", "Spangled, stripes perch, bream", "Chinamen cod, sweet lips", "Snappy, charlie", "Cod, cobia", "Chinaman, red throat emperors, spangled, rock cod", "1 spangled emperor; 1 threadfin ", "Flathead", "Cobbler, released. Black spot, trevally ", "Coral trout|Estuary cod 3 squid", "Grey widdlemen", "Bream", "Striped sea purchase, chinamen", "Mackerel, tuna, slang emperor", "Trevally, parrot", "Spangled, charley, cod", "Spangled, striped emperor, cod, Charlie", "Leather jacket", "Spangled trevally mangrove jack red lipped emperor", "Trevally sweetlips", "Northern flathead, sandbar flathead", "charlie, blue line emperor, 1 unknown", "Charlie’s, red throat snapper, blue line snapper", "Spangled emp, Charlie’s", "Blue lined emp, Charlie", "Charlie, blue lined emp", "Cobia, span mackerel, Charlie", "Grey school Mackie, Spanish Mackie, gt ,yellow striped snapper ,blue spot snapper, snook", "Red throats, coral trout all undersized China men cod", "Mangrove jerk, cobia, spangled emperor, trivali, wrass", "Charlie caught cod", "Tusk, blue bone, Charlie caught", "Sweet lips, one huge one ", "Squid, Charlie cod (released)", "Jackie’s", "Sweetlip, coral trout", "Yellow stripe snapper, flathead, ", "Butter fish", "Sweet lips", "Parrot fish", "Blue lined empowers, parrot fish released", "Yellow fin th a, cobia, fingermark, cod , gold spot cod , trevally, Charlie courts ", "Morwong, wrasse", "Cod, reef fish"), 1, 0)) %>% 
+      
+    mutate(Pel_bin = ifelse(Species %in% c("Mackrel", "School mackrel", "4 dog mackerel 1 threw back|NA", "Mackerel 3 so, trevallu, spangled emp", "Mackeral", "Brim and blue bone and trevally", "Red emperor, Kobe, golbands", "Cobia, spangled emp", "Mackerels and barracuda ", "Kobe, trevally, northwest", "Spangled emperor, spainish mackrel, spainish emperor", "Spanish Mac,real , red cod ", "Trevally, ", "Spangos x2 and a threadfin", "Cobbler, released. Black spot, trevally ", "Shark, let it go", "Snapper, reef shark released, small fish", "Mackey, and another species they threw back because they could I’d it", "2 black marlin and one sail fish", "Mackerel", "Cobia, couldn’t I’d other because of shark", "Spanish Mackey", "Spango 2 trevally 4", "Barracuda", "Flag, mackerel ", "Trevally, parrot", "Marlin, ", "Whalers", "Coronation trout, cobia, black snapper", "Gold band, nanny gyr, trevally", "Cod is, yellow spotted rock cod, tuna, spangled emp", "Giant trivali GOLDEN trivali", "Trevally", "Long tongs, trevally, cods", "Wahoo school mackrel", "Golden trevally", "Spanish mackrel", "Golden trevally, queen fish, gianttrevally, spangled emperor", "Trevally, long tong", "Red emperor, cobia, blue line emperor", "Cod, perch, coral trout, snappers (blue line, spangled), trevally", "Spangled emperor, rankin cod, trevally", "Spangled trevally mangrove jack red lipped emperor", "Marlin ", "Trevally sweetlips", "Marlin and sailfish", "Spangled emperor, red emperor, black tip reef shark", "Yellowfin, Waco, coronation cod", "Spanish mackrel, blue band snapper, spangled ", "Mack", "Dolphin fish", "Black marlin", "Mackerel, rNming cod, jog", "Cobia, span mackerel, Charlie", "Grey school Mackie, Spanish Mackie, gt ,yellow striped snapper ,blue spot snapper, snook", "Mangrove jerk, cobia, spangled emperor, trivali, wrass", "Spanish mackerel, barracuda, ", "Makes, ", "Shark", "Trevally, shark mackerel", "1 mackerel", "Squid 6, Mack tuna", "Spanish, mackerel, spangled sgark mackerel", "Spanish mackerel", "Trivali", "Cobia, spangled emperor, cod ", "Mackerel, coronation trout, shark", "Dollies, Maui Mahon Covina, ", "Sharks,", "Trout, mackerel", "Yellow fin th a, cobia, fingermark, cod , gold spot cod , trevally, Charlie courts ", "Shark, toddler, snapper, blue bones", "Reef shark hooked", "Spanish flag, school Mack 2, spotted Mack"), 1, 0)) %>% 
+    
+    mutate(Mol_bin = ifelse(Species %in% c("Squid", "Brim and blue bone and trevally", "1 squid 2 fish", "Coral trout|Estuary cod 3 squid", "1 fish, 6squid", "Spangler, squid", "Spangled, squid", "6 squid, 2 cod, 1 spangly", "Squid, Charlie cod (released)", "3 squid, 2 red throat emperor", "Squid, 5", "Squid 6, Mack tuna"), 1, 0)) %>% 
+    
+    mutate(Crust_bin = ifelse(Species %in% c("Prawn", "Prawns", "Cray, Spanish flag ", ""), 1, 0))
+  
+  
+  dat <- dat %>% 
+    rowwise() %>% 
+    mutate(catch_grp = sum(Dem_bin, Pel_bin, nrSh_bin, Mol_bin, Crust_bin)) %>% 
+    ungroup() %>% 
+    mutate(catch_per_grp = round(ifelse(catch_grp > 0, CaughtUndam/catch_grp, 0), 2)) %>%
+    mutate(Dem = ifelse(Dem_bin == 1, catch_per_grp, 0)) %>% 
+    mutate(Pel = ifelse(Pel_bin == 1, catch_per_grp, 0)) %>% 
+    mutate(nrSh = ifelse(nrSh_bin == 1, catch_per_grp, 0)) %>% 
+    mutate(Mol = ifelse(Mol_bin == 1, catch_per_grp, 0)) %>% 
+    mutate(Crust = ifelse(Crust_bin == 1, catch_per_grp, 0))
+    
 ```
 
 ## Reason for leaving site
@@ -1159,7 +1190,7 @@ dat <- dat %>%
   dplyr::mutate(exWhyLeave_other = ifelse(str_detect(exWhyLeave_other, "Caught shark|Depredation |Sharks|Saw a shark|Started catching sharks|sharks"), "Depredation", exWhyLeave_other)) %>%
   
   dplyr::mutate(exWhyLeave_other = ifelse(exWhyLeave_other %in% c("Haven’t left yet", "Still going", "While I interviewed them they were still there so I didn’t ask but I saw them leave at 1020", "Still fishing", "Did both bottom trawling and bottom bashing; interviewed about bottom bashing", "Was trolling to next site ", "Note they also had a jet ski- jet ski and dinghy were together", "What to go round to ex marjona and freestyle JetSki", "Leave marine park", "Drop off", "Just playing around"), NA, exWhyLeave_other)) %>%
-  dplyr::mutate(exWhyLeave = ifelse(!is.na(exWhyLeave_other)|exWhyLeave %in% "Other", exWhyLeave_other, exWhyLeave)) %>% 
+  dplyr::mutate(exWhyLeave = ifelse(!is.na(exWhyLeave_other) | exWhyLeave %in% "Other", exWhyLeave_other, exWhyLeave)) %>% 
   dplyr::mutate(exWhyLeave = ifelse(exWhyLeave %in% c("End of day"), "EndOfDay", exWhyLeave)) %>% 
   dplyr::mutate(exWhyLeave = ifelse(exWhyLeave %in% c("Bagged out"), "BagLimit", exWhyLeave))
 ```
@@ -1461,9 +1492,9 @@ dat <- dat %>%
     ID, TripID, SurveyDate, numYear, facYear, Interviewer, mLat, mLong, PersonID, Screen18,
          PrevInter, Agreement, binRecall, TripDate, TripMonth, TripJulianDay, TripNum, SiteNum,
          Site, SiteType, Resident, BoatAccess, nDaysInArea, nBoatDays, nShoreDays, nTimesLast12m,
-         UseLat, UseLong, ActivityType, Activity, Start, Stop, MedianTime, decMedianTime,
+         UseLat, UseLong, ActivityType, Activity, Start, Start_hr, Stop, MedianTime, decMedianTime,
          decDuration, FishingType, BaitLure, MaxHook, KeptUndam, RelUndam, nDP, CaughtUndam,
-         nHooked, binDP, perDP, proDP, CaughtUndam, nHooked, nUndamHr, nDPHr, DPrateHr, Species,
+         nHooked, binDP, perDP, proDP, CaughtUndam, nHooked, nUndamHr, nDPHr, DPrateHr, Dem, Pel, nrSh, Mol, Crust, Dem_bin, Pel_bin, nrSh_bin, Mol_bin, Crust_bin,
          DiveMaxDepth, WhyChoose, exWhyLeave, nexWhyLeave, exTimes12m, bin_exTimes12m, exYrs, nexTimes12m, nexYrs,
          DiveCert, nDives, Age, binAge, Postcode, Accom, Sex,BoatLength, BoatID, Comments, LunarPhase)
 ```

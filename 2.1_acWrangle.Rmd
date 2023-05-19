@@ -45,7 +45,9 @@
     hol <- read_csv("./data/RAW/Holidays.csv") %>%
       mutate(Date = as.POSIXct(Date, format = "%d/%m/%y"))
 
-    consump <- read.csv("./data/RAW/consump.csv")
+    # consump <- read.csv("./data/RAW/consump.csv")
+    
+    boat_perf <- read.csv("./data/RAW/boatengines.csv")
     
     vott <- read.csv("./data/RAW/VOTT.csv")
     
@@ -54,6 +56,10 @@
     # need to resave as proper csv format
     # jan - apr 2023
     fuel <- read_csv("./data/RAW/Monthly-ULP-prices-Gascoyne-201507-202109.csv")
+    
+    # models
+    cons_mod <- readRDS("./models/cons_mod.rda")
+    sp_mod <- readRDS("./models/sp_mod.rda")
     
     # simulation
     sim_name <- "sim1"       #'[#NOTE: check simulation name]  
@@ -73,12 +79,67 @@
 ## Data prep
 
 ```{r}
+
 fuel %<>%
-  mutate(TripMonth = gsub("[^a-zA-Z]", "", Month)) %>% 
-  mutate(numYear = as.numeric(paste0("20", as.numeric(gsub("[^0-9]", "", Month))))) %>% 
+  mutate(TripMonth = gsub("[^a-zA-Z]", "", Month)) %>%
+  mutate(numYear = as.numeric(paste0("20", as.numeric(gsub("[^0-9]", "", Month))))) %>%
   mutate(cost = Average/100)
 
 dat %<>% left_join(fuel[, c("TripMonth", "numYear", "cost")])
+
+
+# VOTT 
+ dat %<>% 
+   left_join(vott[, c("Postcode", "ann_inc", "VOTT")]) %>% 
+   mutate(ann_inc = mean(ann_inc, na.rm = TRUE), ann_inc) %>% 
+   mutate(VOTT = mean(VOTT, na.rm = TRUE), VOTT)
+   
+ 
+ # Consumption
+boat_perf %<>%  
+  filter(kmperh < 4000) %>% 
+    mutate(boat_size2L = ifelse(boatlength <= 3.75, "S", "L")) %>%
+  mutate(boat_size3L = ifelse(boatlength <= 3.75, "S", 
+                            ifelse(boatlength <= 6.75, "M", "L"))) %>% 
+  mutate(cons = kmperl/nEngines)
+
+boat3L <- boat_perf %>% 
+  group_by(boat_size3L) %>% 
+  summarise(sp3l = median(kmperh),
+            cons3l = median(cons))
+
+boat2L <- boat_perf %>% 
+  group_by(boat_size2L) %>% 
+  summarise(sp2l = median(kmperh),
+            cons2l = median(cons))
+  
+dat %<>% 
+   mutate(BoatLength = ifelse(is.na(BoatLength), mean(BoatLength, na.rm = TRUE), BoatLength)) %>%
+  mutate(boat_size2L = ifelse(BoatLength <= 3.75, "S", "L")) %>%
+  mutate(boat_size3L = ifelse(BoatLength <= 3.75, "S", 
+                            ifelse(BoatLength <= 6.75, "M", "L"))) %>% 
+  left_join(boat2L[, c("boat_size2L", "cons2l", "sp2l")], by = "boat_size2L") %>% 
+  left_join(boat3L[, c("boat_size3L", "cons3l", "sp3l")], by = "boat_size3L")
+
+dat %<>% 
+  mutate(cons_flt = median(boat_perf$cons)) %>% 
+  mutate(sp_flt = median(boat_perf$kmperh))
+  
+
+# modeled consumption
+ temp <- dat %>% 
+        dplyr::select(BoatLength) %>% 
+        rename(boatlength = BoatLength) %>% 
+        st_drop_geometry()
+      
+      gam_cons <- predict(cons_mod, temp)
+      gam_sp <- predict(sp_mod, temp)
+      
+      dat$gam_cons <- as.numeric(gam_cons)
+      dat$gam_sp <- as.numeric(gam_sp)
+
+
+rm(fuel, boat2L, boat3L, vott, temp, gam_cons, sp_cons, cons_mod, sp_mod)
 ```
 
 All data filters have to be done before making the choice set.
@@ -181,6 +242,14 @@ st_geometry(grid) <- "geom"
 
  grid <-  ascAtt(ascGrid = grid, grid_id = "gridID_alt", point = dat, br = BRtrips, br_id = "RampID",
               crs = 4283)
+ 
+     # distance of centroid of cells to mainland
+    km_mainland <- dist_mainland(grid$centroid, coast)
+    km_mainland$gridID_alt <- grid$gridID_alt
+    km_mainland %<>% distinct()
+    
+    grid <- left_join(grid, km_mainland) %>% 
+      rename(offshore_dist = km_mainland)
 ```
 ## Data wrangle
 ```{r}
@@ -197,7 +266,7 @@ st_geometry(grid) <- "geom"
       rename(gridID_vis = gridID_alt, dat_geom = geometry) %>%
       #'[#NOTE: select vars for model] 
       #'Mandatory vars: TripID, PersonID, gridID_vis, Site, BoatLength  
-      dplyr::select(TripID, PersonID, gridID_vis, Site, BoatLength) %>% 
+      dplyr::select(TripID, PersonID, gridID_vis, Site, BoatLength, cost, smpl_w, Postcode) %>% 
       distinct() %>%
       mutate(RampID = ifelse(Site %in% "ExmouthBR", 85, NA),
              RampID = ifelse(Site %in% "CoralBayBR", 72, RampID),
@@ -283,31 +352,46 @@ Distance from the boat ramp to the centroid of data points in each grid that lau
                             use.centroid_km.br)) # distance tc to be measured from
     
     # validation plot
-    ggplot(dat) +
-      geom_sf(aes(geometry = asc_geom, fill = use.centroid_km.br), lwd = 0.25) +
-      geom_sf(aes(geometry = br_geom), size = 3) +
-      theme_classic() +
-      scale_fill_distiller(palette = "Blues") +
-      labs(fill = "km from BR", colour = "") +
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
-            legend.spacing.y = unit(0.75, "cm")) +
-      facet_grid(.~fac_br_id) +
-      ggtitle("Check distances look accurate")
+    # ggplot(dat) +
+    #   geom_sf(aes(geometry = asc_geom, fill = use.centroid_km.br), lwd = 0.25) +
+    #   geom_sf(aes(geometry = br_geom), size = 3) +
+    #   theme_classic() +
+    #   scale_fill_distiller(palette = "Blues") +
+    #   labs(fill = "km from BR", colour = "") +
+    #   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    #         legend.spacing.y = unit(0.75, "cm")) +
+    #   facet_grid(.~fac_br_id) +
+    #   ggtitle("Check distances look accurate")
 ```
 
 ## Choice and travel cost ($0.54/km)
 ```{r choice and travel cost}
-    dat <- dat %>% 
-      # mutate(centroidLong = st_coordinates(polyCentroid)[,1]) %>% # need this is
-      # using dynamic variables
-      # mutate(centroidLat = st_coordinates(polyCentroid)[,2]) %>%
-      mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>% 
-      mutate(travelCost = as.numeric(0.58*km_BR)) # 0.58 = ave fuel price/consumption
+# 
+ cons <- median(consump$consump)
 
+      dat <- dat %>%
+        filter(!is.na(Postcode)) %>% 
+        # mutate(boat_size = ifelse(BoatLength <= 4.5, "S",
+        #                           ifelse(BoatLength > 4.5 & BoatLength <= 6, "M",
+        #                                  "L"))) %>% 
+        mutate(boat_size = ifelse(BoatLength <= 3.75, "S", "L")) %>%
+        left_join(consump[, c("boat_size", "consump", "speed")], by = "boat_size") %>%
+        mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>%
+        mutate(fc = round(as.numeric((cost/consump)*km_BR), 2))
+        # mutate(fc = round(as.numeric((cost/cons)*km_BR), 2))
+        # mutate(travelTime = round(site.centroid_km.br/speed, 2)) %>% 
+        # left_join(vott[, c("Postcode", "ann_inc", "VOTT")]) %>% 
+        # mutate(VOTT = round(VOTT*travelTime, 2)) %>% 
+        # mutate(tc = round(VOTT + fc, 2))
+  
 
-#'[#TODO:make a function which appends average for area fuel price to month fo visit for tc calculation ]  
+    #'[#NOTE: Remember to add your interactions]  
 
-    
+    # dat %<>%
+    #   mutate(blkm = BoatLength*offshore_dist) %>% 
+    #   mutate(tcinc = tc*ann_inc) %>% 
+    #   mutate(kmkids = kids*offshore_dist)
+
     #'[#VALIDATE: TRUE, should equal number of trips]
     sum(dat$choice) == n_distinct(dat$TripID)
 ```

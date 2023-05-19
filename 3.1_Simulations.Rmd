@@ -18,37 +18,23 @@ library(raster)
 library(rgeos)
 library(rgdal)
 library(sf)
+library(readxl)
 
 # data
-dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # this is the generalised data with static site attributes
 # dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # this is the generalised data with static site attributes
-BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by the "TripAllocation.R" script (Matt)
+# # dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # this is the generalised data with static site attributes
+# BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by the "TripAllocation.R" script (Matt)
+dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")
 
 # Plotting
-mp <- st_read("./data/gpkg/pmmp_4326.gpkg")
-# mp_bbox <- st_read("./data/gpkg/pscmpBbox_4326.gpkg")
-NPZ <- st_read("./data/gpkg/ntz_4283.gpkg")
+# mp <- st_read("./data/gpkg/pmmp_4326.gpkg")
+# # mp_bbox <- st_read("./data/gpkg/pscmpBbox_4326.gpkg")
+# NPZ <- st_read("./data/gpkg/ntz_4283.gpkg")
 
 grid <- dat %>% as.data.frame() %>%
   distinct(gridID_alt, .keep_all = TRUE) %>%
-  dplyr::select(gridID_alt, geom) %>%
+  dplyr::select(gridID_alt, geometry) %>%
   st_as_sf()
-
-# defualt figure
- ax.title <- 14
- ax.text <- 9
-  ax.legend <- 12
-  strip <- 9
-  a4_width <- 160
-  my_theme <- theme_classic() + theme( axis.text = element_text(size = ax.text),
-                                    text = element_text(size = ax.text),
-                                    axis.title = element_text(size = ax.title),
-                                    line = element_line(size = 0.3),
-                                    strip.background = element_rect(colour = "white", fill =
-                                                                      "gray80"),
-                                    strip.text = element_text(size = strip))
-
- col <- c("#d38685") 
 ```
 
 Model Data
@@ -58,102 +44,12 @@ v: covariance matrix
 ```{r}
 # base model
 b <- read_excel("./data/03_data/attmod_base.xlsx") %>% dplyr::select(Vars, Coef)
-v <- read_excel("./data/03_data/attmod_base.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
+
+a <- nrow(b) + 2
+v <- read_excel("./data/03_data/attmod_base.xlsx", sheet = "v", col_names = rep("x", a)) %>%
   dplyr::select(-x...1 ) %>%
   distinct()
-
-# no area model (test to see if area is causing  the issue)
-# b <- read_excel("./data/03_data/attmod_noarea.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_noarea.xlsx", sheet = "v", col_names = rep("x", 7)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-# area model (not log transformed)
-# b <- read_excel("./data/03_data/attmod_area.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_area.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   binary complete hex
-# b <- read_excel("./data/03_data/attmod_comhex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_comhex.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   complete hex + arealog
-# b <- read_excel("./data/03_data/attmod_arealog_comhex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_arealog_comhex.xlsx", sheet = "v", col_names = rep("x", 9)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   complete hex + area
-# b <- read_excel("./data/03_data/attmod_area_comhex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_area_comhex.xlsx", sheet = "v", col_names = rep("x", 9)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   complete hex*arealog
-# b <- read_excel("./data/03_data/attmod_arealoghex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_arealoghex.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   complete hex*arealog + arealog
-# b <- read_excel("./data/03_data/attmod_arealog_arealoghex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_arealog_arealoghex.xlsx", sheet = "v", col_names = rep("x", 9)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-# complete hex*area
-# b <- read_excel("./data/03_data/attmod_areahex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_areahex.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-# complete hex*area, area
-# b <- read_excel("./data/03_data/attmod_area_areahex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_area_areahex.xlsx", sheet = "v", col_names = rep("x", 9)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-# complete hex*area, area
-# b <- read_excel("./data/03_data/attmod_shex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_shex.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-#   
-#   # base model 5km
-# b <- read_excel("./data/03_data/attmod_5kmbase.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_5kmbase.xlsx", sheet = "v", col_names = rep("x", 7)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   # 5 km comm hex (like for like compasrion with model below)
-# b <- read_excel("./data/03_data/attmod_5km_commhex.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_5km_commhex.xlsx", sheet = "v", col_names = rep("x", 7)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-
-#   # 1 km no shelter (like for like compasrion with model above)
-# b <- read_excel("./data/03_data/attmod_1km_noshelter.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_1km_noshelter.xlsx", sheet = "v", col_names = rep("x", 7)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-#   
- # 1 km no shelter log(area+1)
-# b <- read_excel("./data/03_data/attmod_1kmlogarea_noshelter.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_1kmlogarea_noshelter.xlsx", sheet = "v", col_names = rep("x", 7)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
-#   
-#   1km grid, commhes, only demersal
-# b <- read_excel("./data/03_data/attmod_comhex_dem.xlsx") %>% dplyr::select(Vars, Coef)
-# v <- read_excel("./data/03_data/attmod_comhex_dem.xlsx", sheet = "v", col_names = rep("x", 8)) %>%
-#   dplyr::select(-x...1 ) %>%
-#   distinct()
 ```
-
-
 # Rearrange data
 Aim is to have matrix with same row names and column names
 ```{r rearrange, include = FALSE}
@@ -161,8 +57,8 @@ Aim is to have matrix with same row names and column names
     v %<>% dplyr::select(-vars)
     vars <- b$Vars #use
     
-# nrow(b) == length(v) # should be true
-# length(v) == nrow(v) # should be true
+nrow(b) == length(v) # should be true
+length(v) == nrow(v) # should be true
 ```
 
 # Transformation
@@ -170,11 +66,7 @@ Need to transform data in choice ste to match transformations used in model
 ```{r transformations, include = FALSE}
 dat <- dat %>%
   # mutate(depthsquared = Depth*Depth) %>%
-   mutate(arealog = log(as.numeric(area) + 1)) %>%
-  mutate(hex_arealog = commhex*arealog) %>% 
-  mutate(hex_area = commhex*area) %>% 
-  st_drop_geometry() %>%
-  as.data.frame()
+   mutate(arealog = log(as.numeric(area) + 1))
 ```
 
 # Error 
@@ -199,55 +91,15 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
 
 ```{r utility, include = FALSE}
 
-# define vars used in RUM
-# base model
-     vars <- c("travelCost", "Depth", "arealog","km_mainland", "isl_adj", "shelter")
-     
-# no area
-     # vars <- c("travelCost", "Depth", "km_mainland", "isl_adj", "shelter")
-
-# area
-     # vars <- c("travelCost", "Depth", "area","km_mainland", "isl_adj", "shelter")
-
-# complete hex
-     # vars <- c("travelCost", "Depth", "commhex","km_mainland", "isl_adj", "shelter")
-
-# arealog + complete hex
-     # vars <- c("travelCost", "Depth", "arealog", "commhex","km_mainland", "isl_adj", "shelter")
-
-# complete hex + area
-  # vars <- c("travelCost", "Depth", "area", "commhex","km_mainland", "isl_adj", "shelter")
-
-# complete hex*arealog
-  # vars <- c("travelCost", "Depth", "hex_arealog","km_mainland", "isl_adj", "shelter")
-
-# complete hex*arealog + arealog
-  # vars <- c("travelCost", "Depth", "arealog","hex_arealog","km_mainland", "isl_adj", "shelter")
-  # 
-# complete hex*area
-  # vars <- c("travelCost", "Depth", "area","hex_area","km_mainland", "isl_adj", "shelter")
-  # 
-# base model 5km
-     # vars <- c("travelCost", "Depth", "arealog","km_mainland", "isl_adj")
-
-# 5km comm hex
-      # vars <- c("travelCost", "Depth", "commhex","km_mainland", "isl_adj")
-
-# 1km no shelter
-     # vars <- c("travelCost", "Depth", "commhex","km_mainland", "isl_adj")
-
-# 1km no shelter, area log
-     # vars <- c("travelCost", "Depth", "arealog","km_mainland", "isl_adj")
-
-# 1km, comm hex, demersal only
-     # vars <- c("travelCost", "Depth", "commhex","km_mainland", "isl_adj", "shelter")
-
-# turn defined vars into matrix from dat, make sure there is no geometry
-    rum_matrix <- as.matrix(dat[, vars]) 
-    # nrow(rum_matrix) == nrow(dat) # should be true. 
-    
-# create an empty utility matrix
-    Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) 
+  bid <- unique(b$Vars) 
+  id_vars <- dat %>% dplyr::select(matches(bid))
+  vars <- c(names(id_vars), "isl_adj") #TODO automate
+      
+    # turn defined vars into matrix from dat, make sure there is no geometry
+        rum_matrix <- as.matrix(dat[, vars])
+        
+    # create an empty utility matrix
+        Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) 
     
 # calculate fixed utility for every alternative (nrows), n1 times from multivariate random normal distribution. %*% is a matrix multiplication where...
 # We are multiplying the values in the rum_matrix (real data) by the error coefficients matrix (mvn_b)? so we have 100 utility values for each variable -? why? 
@@ -268,9 +120,9 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 
     Vj <- as.data.table(Vj) # make data.table to save RAM
     cols <- colnames(Vj) # save the names of the draws for later
-    Vj$br <- as.integer(dat$BR) # run function by BR
+    Vj$br <- as.integer(dat$Site) # run function by BR
     Vj$ID <- as.integer(dat$gridID_alt) # add gridID_alt for group_by
-    Vj$tc <- dat$travelCost # add travel cost
+    Vj$tc <- dat$tc3L # add travel cost
 
 # Calculate probability of visit and logsums: pre-simulation
 # probability function:  probj = exp(Vj)/sum(exp(Vj))
@@ -284,7 +136,7 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     # Vj[Vj$ID %in% npz$gridID_alt, cols] <- 0 # remove for 5 km grid
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] 
     p <- p[order(br, ID)]
-    dat %<>% arrange(BR, gridID_alt)
+    dat %<>% arrange(Site, gridID_alt)
     table(dat$gridID_alt == p$ID) # this should all be true (they do now)
     
     # alternatives presented to the person - sum of exp(Vj)

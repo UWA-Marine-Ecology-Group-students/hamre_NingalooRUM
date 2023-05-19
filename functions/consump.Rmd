@@ -1,0 +1,57 @@
+```{r}
+# libraries 
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(magrittr)
+library(gam)
+library(mgcv)
+
+dat <- read.csv("../data/RAW/boatengines.csv") %>% 
+  filter(kmperh < 4000) 
+```
+
+```{r}
+dat$cons <- dat$kmperl/dat$nEngines
+
+summary(dat$boatlength)
+
+# dat %<>% 
+#   mutate(boat_size = ifelse(boatlength <= 4.5, "S", 
+#                             ifelse(boatlength > 4.5 & boatlength <= 6, "M",
+#                                    "L")))
+
+dat %<>% 
+  mutate(boat_size = ifelse(boatlength <= 3.75, "S", "L")) %>% 
+  mutate(boat_size = as.factor(boat_size))
+
+consump <- dat %>% 
+  group_by(boat_size) %>% 
+  summarise(consump = median(cons),
+            speed = median(kmperh))
+
+
+# modelling boat consumption
+cons_mod <- gam(cons ~ s(boatlength, k = 3, bs = 'cr'), data = dat)
+
+ggplot(dat = dat, aes(x = boatlength, y = cons)) +
+  geom_point() + 
+  stat_smooth(method = "gam")
+
+# modeeling boat speed
+sp_mod <- gam(kmperh ~ s(boatlength, k = 3, bs = 'cr'), data = dat)
+
+ggplot(dat = dat, aes(x = boatlength, y = kmperh)) +
+  geom_point() + 
+  stat_smooth(method = "gam")
+```
+
+
+
+```{r}
+write.csv(consump, "../data/RAW/consump.csv")
+
+saveRDS(cons_mod, file = "../models/cons_mod.rda")
+saveRDS(sp_mod, file = "../models/sp_mod.rda")
+```
+

@@ -10,14 +10,21 @@
 * ============================================================================
 
 **# set up
-* define directory  
 
-	cd "/Users/23088313/Documents/git_repos/hamre_MarmionRUM"
+	clear // clear workspace
 
-* read data 
+	local project "hamre_NingalooRUM" // define project
+	local imdir "/Users/23088313/Documents/git_repos/`project'/data/02_data" // import data directory
+	local exdir "/Users/23088313/Documents/git_repos/`project'/data/03_data" // export data directory
+	
+	local sim "sim1" // define simulation
+	
+	import delimited "`imdir'/2.1_asc_rum_`sim'.csv" // import data
+	
+**# wrangle
 
-	clear
-	import delimited "data/02_data/2.1_acdat.csv"
+	gen fchoice = choice == 1 // make factors
+	destring *, ignore("NA") replace // change strings to numeric
 
 **# data prep 
 
@@ -36,24 +43,8 @@
 	** export delimited using "data/03_data/3.0_dat.csv", replace
 
 **# model
-* use "#" for interaction, ## for full factorial interaction
-* need to prefix numeric variables with "c." when including in interaction
-* prefix factors with "i."
-
-* base model
-	
-	clogit fchoice c.travelcost fsz1 fsz2 fsz3 fsz4 fsz5, group(tripid)
-	estimates store basemod
-
-* line_ma - test interactions example
-	* clogit choice c.travelcost c.depth c.depthsquared area i.fisl_adj line_ma, group(tripid)
-	* estimates store mod1
-	
-* get AIC for each
-
-	* estimate stats basemod testmod testmod2 testmod3 testmod4 testmod5 testmod6
-	
-	* estimates testmod6
+	asclogit fchoice c.fc [pweight=smpl_w], case(tripid) alt(gridid_alt) 
+	estimates store mod1
 	
 * store variance-covariance matrix 
 

@@ -1,0 +1,32 @@
+```{r}
+library(tidyverse)
+library(readxl)
+library(magrittr)
+
+
+dat_21 <- read_csv("../data/RAW/2021Census_G02_AUST_POA.csv")
+
+dat_21 %<>% dplyr::select(c("POA_CODE_2021", "Median_tot_hhd_inc_weekly"))
+
+dat_21 %<>% 
+  mutate(Postcode = as.numeric(gsub("[^0-9]", "", POA_CODE_2021))) %>% 
+  mutate(ann_inc = Median_tot_hhd_inc_weekly*52) %>% 
+  mutate(VOTT = round(ann_inc/(38*52), 2)) %>% 
+  mutate(Year = 2021)
+
+dat_16 <- read_csv("../data/RAW/2016Census_G02_Aus_POA.csv")
+
+dat_16 %<>% dplyr::select(c("POA_CODE_2016", "Median_tot_hhd_inc_weekly"))
+
+dat_16 %<>% 
+  mutate(Postcode = as.numeric(gsub("[^0-9]", "", POA_CODE_2016))) %>% 
+  mutate(ann_inc = Median_tot_hhd_inc_weekly*52) %>% 
+  mutate(VOTT = round(ann_inc/(38*52), 2)) %>% 
+  mutate(Year = 2016)
+
+
+dat <- left_join(dat_21, dat_16, by = "Postcode", suffix = c("_21", "_16"))
+
+write_csv(dat, "../data/RAW/VOTT.csv")
+```
+

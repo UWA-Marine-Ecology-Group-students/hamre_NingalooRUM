@@ -15,26 +15,29 @@ library(RNetCDF)
 library(ncdf4)
 library(googledrive)
 library(corrplot)
-library(windfetch)
+# library(windfetch)
 
 # functions
 source("./functions/spatialFunc.R") # spatial functions
 
 # data
-dat <- read_csv("./ignore/02_data/2.1_esp.csv")
+dat <- read_csv("./data/02_data/2.1_dat.csv")
 
 ## spatial
 ### gpkg - ESPG 4283 (GDA94)
-# sites <- readRDS("./data/gpkg/2.0_espSites_4283.gpkg") # sites with static attributes
-coast <- st_read("./data/gpkg/espCoast_4283.gpkg") # coast
+# sites <- readRDS("./data/gpkg/2.0_Sites_4283.gpkg") # sites with static attributes
+coast <- st_read("./data/gpkg/coast.gpkg") %>%  st_transform(4283)
 ```
 
 # Data prep
 ```{r data prep}
 # # making use data spatial 
-spdat <- dat %>%
+dat %<>%
   filter(!is.na(UseLat), !is.na(UseLong)) %>%
   st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
+
+sm_dat <- dat %>%  
+  mutate(trp_grid = str)
 ```
 
 
@@ -44,11 +47,11 @@ spdat <- dat %>%
 coast_lambert <- coast %>%
   st_transform(crs = 3112) # need land lambert shp file loaded
 
-sst_kelvins <- get_sst(spdat$TripDate, spdat$centroidLong, spdat$centroidLat) # getting sst
+sst_kelvins <- get_sst(dat$TripDate, dat$centroidLong, dat$centroidLat) # getting sst
 
 sst_celcius <- sst_kelvins - 273.15 # convert to celcius
 
-spdat$sst <- sst_celcius
+dat$sst <- sst_celcius
 ```
 
 ## Swell height and wind speed
@@ -78,17 +81,16 @@ Not very high res - not useful for area whith lots of islands like Esperance.
 
 # Plotting corroloation matrix
 ```{r corr}
-num_dat <- dplyr::select_if(dat, is.numeric) # subset to numericv variables
-cor <- round(cor(num_dat, use = "complete.obs"), 2) # get correlations
-corrplot <- corrplot(cor) # plot correlations
-cor
-
+# num_dat <- dplyr::select_if(dat, is.numeric) # subset to numericv variables
+# cor <- round(cor(num_dat, use = "complete.obs"), 2) # get correlations
+# corrplot <- corrplot(cor) # plot correlations
+# cor
 ```
 
 # Save output
 ```{r save}
-saveRDS(spdat, "./ignore/02_data/2.2_espSites_4283.gpkg")
+saveRDS(dat, "./data/02_data/2.2_Site_4283.gpkg")
 
-dat <- spdat %>%  st_drop_geometry %>% as.data.frame()
-write.csv(dat, "./ignore/02_data/2.2_espSites.csv")
+dat_df <- dat %>%  st_drop_geometry %>% as.data.frame()
+write.csv(dat, "./data/02_data/2.2_dat.csv")
 ```

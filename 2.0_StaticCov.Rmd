@@ -1,158 +1,160 @@
-
 ```{r setup}
-# knitr options
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width = 10, fig.height = 7) 
+    # knitr options
+    knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center',
+                          fig.width = 10, fig.height = 7) 
+    
+    # libraries 
+    library(tidyverse)
+    library(dplyr)
+    library(ggplot2)
+    library(sp)
+    library(raster)
+    library(rgeos)
+    library(rgdal)
+    library(sf)
+    library(googledrive)
+    library(units)
+    library(nngeo)
+    # library(windfetch)
+    
+    # functions
+    source("./functions/spatialFunc.R") # spatial functions
+    
+    # spatial data
+    ## gpkg - ESPG 4283 (GDA94)
+    ## raster - ESPG 4326 (WGS84)
 
-# libraries 
-library(tidyverse)
-library(dplyr)
-library(ggplot2)
-library(sp)
-library(raster)
-library(rgeos)
-library(rgdal)
-library(sf)
-library(googledrive)
-library(units)
-library(nngeo)
-library(windfetch)
-
-# functions
-source("./functions/spatialFunc.R") # spatial functions
-
-# data
-## spatial
-### gpkg - ESPG 4283 (GDA94)
-BR <- st_read("./data/gpkg/BR_4283.gpkg") # boat ramps
-coast <- st_read("./data/gpkg/Coast_4283.gpkg") # coast
-# habitat <- st_read("./data/gpkg/espHabitat_4283.gpkg") # habitat
-sites <- st_read("./data/gpkg/Sites_3857.gpkg") %>%  st_transform(4283)# MVM grid
-studySite <- st_read("./data/gpkg/StudySite_4283.gpkg") # study site (mega mvm polygon)
-# artInfra <- st_read("./data/gpkg/espArtInfra_4283.gpkg")
-shelter <- st_read("./data/gpkg/shelter_3857.gpkg")
-NPZ <- st_read("./data/gpkg/ntz_4283.gpkg") # commonwealth and current state NTZ
-
-### raster - ESPG 4326 (WGS84)
-bathy <- raster("./data/raster/bathy_4326.tif") # bathy
-
-sf_use_s2(FALSE)
-
-# make sure all layers overlap
-# ggplot()+
-  # geom_sf(data = sites, lwd = 0.05) +
-  # geom_sf(data = shelter, fill = 'red', colour = 'red') +
-  # geom_sf(data = BR) +
-  # geom_sf(data = NPZ)
+    BR <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% st_transform(crs = 4283)# from BRtrips.R
+    
+    coast <- st_read("./data/gpkg/coast.gpkg") %>%  st_transform(4283)
+    
+    ext <- st_read("./data/gpkg/gridextent.gpkg") # study site (mega mvm polygon)
+    
+    # artInfra <- st_read("./data/gpkg/ArtReef.gpkg")
+    
+    ntz <- st_read("./data/gpkg/ntz.gpkg") # commonwealth and current state NTZ
+    
+     habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
+      st_transform(crs = 4283) %>% 
+      st_make_valid()
+    
+    bathy <- raster("./data/raster/NWSbathy.tif") # bathy
+    
+    sf_use_s2(FALSE)
+    
+    # check layers
+    ggplot() +
+      geom_sf(data = ext, lwd = 0.05) +
+      geom_sf(data = coast) +
+      geom_sf(data = BR, colour = 'red') +
+      geom_sf(data = ntz)
+    
+    ggplot() +
+      geom_sf(data = habitat, aes(fill = habitat), lwd = 0.1)
 ```
-
-# Static Variables
-This script add static spatial variables to all cells in a grid. 
-
-    - unique ID
-    - mean depth
-    - centroid of grid
-    - area of every habitat
-    - area of every grid
-    - presence of adjacent island
-    - presence of artificial infrastructure (eg. FADS, artificial reefs)
-    - distance to boat ramp
-    - distance to mainland
-    - southern fetch (shelter)
-    - commonwealth NPZ
-
-## Assign unique identifier to each grid cell
-For Esperance is needs to match the mapper and add in ids for new cells. 
-```{r gridID}
-sites <- sites %>% 
-  dplyr::select(geom) %>% 
-  mutate(gridID = row_number()) %>% 
-  st_make_valid()
-```
-
-# shelter 
-Needs to be done before you manipulate IDs
+# Make grid
 ```{r}
-sites$shelter <- ifelse(sites$id %in% shelter$id, 1, 0)
+  grid <- st_difference(ext, st_union(st_combine(ntz))) # cut npz out of sims
 
-# ggplot() +
-#   geom_sf(data = sites, aes(fill = shelter), lwd = 0.05)
-```
-
-
-## Depth
-Calculates the average depth within each grid cell (site). This does work is after grid manipulation.  
-
-```{r depth}
-sites <- mean_depth(bathy, sites) # get average depth of grid
-
-# ggplot() +
-#   geom_sf(data = sites, aes(fill = Depth), lwd = 0.05)
-```
-
-## Data prep
-  - waterGrid: sf (polygon) of the grid which is only on the water
-  - polyCentroid: sf (point) which is the centroid of each grid cell/site if water_grid
+  grid <- st_make_grid(grid, cellsize = 0.05, square = FALSE, crs = 4283) %>% 
+    st_intersection(grid) %>% 
+    st_as_sf() %>% 
+    mutate(ntz = 0)
   
-```{r data prep}
-sf_use_s2(FALSE)
+  
+  grid$area <- round(set_units(st_area(grid), km^2), 2) 
 
-waterGrid <- st_difference(sites, st_combine(coast)) # isolates grid to water
-polyCentroid <- st_centroid_within_poly(waterGrid) # gets centroid of every grid cell
-waterGrid$polyCentroid <- polyCentroid$geom # bind centroid to grid sf 
+  grid %<>% mutate(area = as.numeric(area)) 
+   
+   # grid %<>% filter(area >= 3)
+   
+  # ggplot() +
+  #   geom_sf(data = grid, aes(fill = area), lwd = 0.05)
+  
+  ntz_grid <- st_make_grid(ext, cellsize = 0.05, square = FALSE, crs = 4283) %>% 
+    st_intersection(ntz) %>% 
+    st_as_sf() %>% 
+    mutate(ntz = 1)
+  
+  ntz_grid$area <- round(set_units(st_area(ntz_grid), km^2), 2) 
 
-# ggplot() +
-#   geom_sf(data = waterGrid$polyCentroid)
+  ntz_grid %<>% mutate(area = as.numeric(area)) 
+   
+  # ntz_grid %<>% filter(area >= 3)
+  
+  # ggplot() +
+  #   geom_sf(data = ntz_grid, aes(fill = area), lwd = 0.05)
+  
+  grid <- rbind(grid, ntz_grid)
+  
+  grid %<>% 
+    mutate(gridID = row_number())
+
+   ggplot() +
+    geom_sf(data = grid, aes(fill = area), lwd = 0.05)
+```
+
+# Attributes
+## Depth
+Calculates the average depth within each grid cell (site). This does work is after grid manipulation.
+```{r depth}
+    grid <- mean_depth(bathy, grid) # get average depth of grid
+    
+    ggplot() +
+      geom_sf(data = grid, aes(fill = Depth), lwd = 0.05)
+```
+
+## Centroid
+```{r}
+    centroid <- st_centroid_within_poly(grid) # gets centroid of every grid cell
+    grid$centroid <- centroid$x # bind centroid to grid sf 
+    
+    ggplot() +
+      geom_sf(data = grid$centroid, size = 0.05)
 ```
 
 ## Habitat
 Calculates the area (km2) of each habitat type in each individual grid cell (site)
 ```{r habitat}
-# waterGrid <- habitat_area(sf_habitat = habitat, col_habitat=1, sf_grid = waterGrid, id_grid = ID)
+# grid <- habitat_area(sf_habitat = habitat, col_habitat = 1, sf_grid = grid, id_grid = gridID) # need to update updated pivot wioder from spread
+  habitat %<>% st_make_valid()
+  hab <- st_intersection(habitat, grid) # This gives you all the individual areas where there is overlap between the habitat and grid, includes original ID
+  hab <- st_make_valid(hab) # make intersection valid
+  hab$hab_area <- round(set_units(st_area(hab), km^2), 2) # calculate the are of each habitats in intersection grids
+  hab %<>% mutate(hab_area = as.numeric(hab_area)) 
+  hab <- hab %>% pivot_wider(names_from = "habitat", values_from = "hab_area", values_fill = 0)
+  
+  habs <- unique(habitat$habitat)
+  
+  hab_grid <- hab %>%
+    group_by(gridID) %>%
+    summarise_at(habs, .funs = sum) %>%
+    ungroup() %>%
+    st_drop_geometry()
+  
+  #'[#VALIDATE: If grid and hab_grid do not have the same rows than some grids are out with the habitat layer. check to see what these or so they can be filled in or removed]
+    
+  # nrow(grid) == nrow(hab_grid)
+  # 
+  # diff <- grid %>% filter(gridID %in% c(setdiff(grid$gridID, hab_grid$gridID)))
+  #   
+  # ggplot() +
+  #   geom_sf(data = grid, lwd = 0.05) +
+  #   geom_sf(data = diff, fill = "red", lwd = 0.05)
+
+  # all are at the very edges and are pelagic
+    
+  grid %<>% left_join(hab_grid, by = "gridID")
+  
+  grid <- grid %>% 
+    mutate(Pelagic = ifelse(is.na(Pelagic), area, Pelagic)) %>% 
+    mutate_at(c("Lagoon", "Reef", "RReef"), ~replace_na(.,0))
 ```
-
-## Area
-Calculates the area of each polygon
-```{r area}
-waterGrid$area <- round(set_units(st_area(waterGrid), km^2), 2) 
-
-# ggplot() +
-#   geom_sf(data = waterGrid, aes(fill = as.numeric(area)))
-
-waterGrid <- waterGrid %>%
-  mutate(hex = ifelse(as.numeric(area) >= 0.6, "large", NA)) %>%
-  mutate(hex = ifelse(as.numeric(area) >= 0.1 & as.numeric(area) <= 0.6, "medium", hex)) %>%
-  mutate(hex = ifelse(as.numeric(area) <= 0.1, "small", hex)) %>%
-  mutate(hex = as.factor(hex)) %>%
-  mutate(hex_num = ifelse(hex %in% "large", 1, NA)) %>%
-  mutate(hex_num = ifelse(hex %in% "medium", 2, hex_num)) %>%
-  mutate(hex_num = ifelse(hex %in% "small", 3, hex_num)) %>%
-  mutate(hex_num = as.numeric(hex_num))
-
-waterGrid <- waterGrid %>% 
-  mutate(Lhex = ifelse(as.numeric(area) >= 0.6, 1, 0)) %>% 
-  mutate(Mhex = ifelse(as.numeric(area) > 0.1 & as.numeric(area) < 0.6, 1, 0)) %>% 
-  mutate(Shex = ifelse(as.numeric(area) <= 0.1, 1, 0))
-
-waterGrid <- waterGrid %>% 
-  mutate(commhex = ifelse(as.numeric(area) == 0.63, 1, 0))
-
-# dat %>%
-#   group_by(hex) %>%
-#   summarise(sum(choice))
-#   Not enough data at small spatial scales for model to work. add this as a dummy variable instead of area.
-```
-
-## Artificial infrastructure present
-Creates binary list indicating whether there is artificial infrastructure present in grid cell (site)
-
-```{r artificial infrastructure present}
-# waterGrid$ArtInfra_present <- as.numeric(st_intersects(artInfra, waterGrid, sparse = FALSE)) 
-```
-
 ## Land
 Distance to mainland: Calculates the linear distance from the centroid of every grid cell (site) to the nearest point on mainland.
 Adjacent to land: Creates binary list indicating whether there is an island are adjacent to grid cell (site).
 ```{r land present}
+coast %<>% st_cast("POLYGON")
 coast$area <- as.numeric(set_units(st_area(coast), km^2)) # area of polygons in coast sf
 
 # Distance from mainland
@@ -162,9 +164,9 @@ mainland <- coast %>%
   slice(1)
 
 # ## calculate distance form mainland
-km_mainland <- dist_mainland(waterGrid$polyCentroid, mainland)
+km_mainland <- dist_mainland(grid$centroid, mainland)
 # 
-waterGrid$km_mainland <- km_mainland[,1]
+grid$km_mainland <- km_mainland[,1]
 
 # Adjacent to land
 ## extracting islands from coast polygon
@@ -173,18 +175,35 @@ islands <- coast %>%
   slice(2:nrow(coast))
 
 ## create binary column indicating whether grid cell is adjacent to island
-waterGrid %<>%
-  mutate(isl_adj = ifelse(as.list(st_intersects(waterGrid, islands)) %in% "integer(0)", 0, 1))
+grid %<>%
+  mutate(isl_adj = ifelse(as.list(st_intersects(grid, islands)) %in% "integer(0)", 0, 1))
 
-# ggplot() +
-#   geom_sf(data = waterGrid, aes(fill = km_mainland))
-# 
-# ggplot()+
-#   geom_sf(data = waterGrid, aes(fill = isl_adj))
+# checkpoint
+ggplot() +
+  geom_sf(data = grid, aes(fill = km_mainland))
+
+ggplot() +
+  geom_sf(data = grid, aes(fill = isl_adj))
+```
+## Dist to BR
+Calculates the linear distance from each boat ramp to every centroid - data frame rows should multiple by number of boat ramps.
+
+```{r distance to BR}
+dist <- as.data.frame(set_units(st_distance(grid$centroid, BR), km)) 
+names(dist) <- unique(BR$RampID)
+gridID <- grid$gridID
+dist$gridID <- gridID
+dist <- dist %>% gather("RampID", "km_BR", 1:length(dist) - 1) 
+grid %<>% left_join(dist, by = "gridID") # join to input data
 ```
 
-# Fetch
-Calculating the Southerly and Easterly fetch from the centroid of all polygons on every day. If fetch is over 2.5km then 1 else 0.
+## Artificial infrastructure present
+Creates binary list indicating whether there is artificial infrastructure present in grid cell (site)
+```{r artificial infrastructure present}
+# waterGrid$ArtInfra_present <- as.numeric(st_intersects(artInfra, waterGrid, sparse = FALSE)) 
+```
+
+## Fetch
 ```{r fetch}
 # coast_lambert <- coast %>% st_transform(crs = 3112) # need land lambert
 # 
@@ -194,7 +213,6 @@ Calculating the Southerly and Easterly fetch from the centroid of all polygons o
 ```
 
 ## Shelter
-Fetch was too computationally heavy for my time scale, so i've made a shape file with all the grids that have shelter present.
 ```{r}
 # shelter <- shelter %>% st_transform(crs(coast))
 # waterShelter <- st_difference(shelter, st_combine(coast)) # isolate
@@ -215,34 +233,7 @@ Fetch was too computationally heavy for my time scale, so i've made a shape file
 # ggplot() +
 #   geom_sf(data = waterGrid, aes(fill = shelter), lwd = 0.05)
 ```
-
-## Commonwealth NPZ
-Adding a binary variable as to whether a grid is within a NPZ, if so it will need to have 0 utility for recreational fishers. 
-```{r}
-npz <- st_union(NPZ)
-
-npz_grids <- as.list(st_intersects(waterGrid, npz, sparse = FALSE))
-
-waterGrid <- waterGrid %>% 
-  mutate(NPZ = ifelse(npz_grids == TRUE, 1, 0))
-
-# ggplot() +
-#   geom_sf(data = waterGrid, aes(fill = NPZ), lwd = 0.05)
-```
-
-# Distance to BR
-Calculates the linear distance from each boat ramp to every centroid - data frame rows should multiple by number of boat ramps.
-
-```{r distance to BR}
-dist <- as.data.frame(set_units(st_distance(waterGrid$polyCentroid, BR), km)) 
-names(dist) <- unique(BR$RampID)
-gridID <- waterGrid$gridID
-dist$gridID <- gridID
-dist <- dist %>% gather("BR", "km_BR", 1:length(dist) - 1) 
-waterGrid <- waterGrid %>% left_join(dist, by = "gridID") # join to input data
-```
-
 ## Save output
 ```{r save}
-saveRDS(waterGrid, "./data/gpkg/2.0_Sites_4283.gpkg")
+saveRDS(grid, "./data/gpkg/2.0_Sites_4283.gpkg")
 ```

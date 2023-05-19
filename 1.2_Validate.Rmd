@@ -11,7 +11,7 @@ library(rgdal)
 library(sf)
 
 # functions
-source("./functions/cleaningFunc.R") # spatial functions
+source("./functions/genFunc.R") # spatial functions
 
 # data
 dat <- read_csv("./data/01_data/1.1_dat.csv")
