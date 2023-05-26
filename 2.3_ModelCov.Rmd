@@ -323,7 +323,7 @@ fss.all = list()
 top.all = list()
 resp.vars = unique.vars.use
 
-# k is knows determines out wigglgying we allow the line to be 
+# k is knows determines out wigglgying we allow the line to be - ther higher the knots the smoother
 # cr is structure we give to n caught
 # re = random effect
 
@@ -343,7 +343,10 @@ model.set <- generate.model.set(use.dat = dat,
                                 k = 3, 
                                 null.terms = "s(PersonID, bs = 're')", 
                                 smooth.smooth.interactions = F, 
-                                factor.factor.interactions = F)
+                                factor.factor.interactions = F,
+                                cov.cutoff =  T)
+
+# add Cov.cutoff
 
 out.list <- fit.model.set(model.set, max.models = 600, parallel = T)
 

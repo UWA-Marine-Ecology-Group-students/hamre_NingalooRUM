@@ -1496,7 +1496,7 @@ dat <- dat %>%
          decDuration, FishingType, BaitLure, MaxHook, KeptUndam, RelUndam, nDP, CaughtUndam,
          nHooked, binDP, perDP, proDP, CaughtUndam, nHooked, nUndamHr, nDPHr, DPrateHr, Dem, Pel, nrSh, Mol, Crust, Dem_bin, Pel_bin, nrSh_bin, Mol_bin, Crust_bin,
          DiveMaxDepth, WhyChoose, exWhyLeave, nexWhyLeave, exTimes12m, bin_exTimes12m, exYrs, nexTimes12m, nexYrs,
-         DiveCert, nDives, Age, binAge, Postcode, Accom, Sex,BoatLength, BoatID, Comments, LunarPhase)
+         DiveCert, nDives, Age, Party, binAge, Postcode, Accom, Sex,BoatLength, BoatID, Comments, LunarPhase)
 ```
 
 # Check point

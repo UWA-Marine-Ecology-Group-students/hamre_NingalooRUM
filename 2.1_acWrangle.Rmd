@@ -21,7 +21,8 @@
     library(nngeo)
     library(magrittr)
     library(todor)
-    
+    library(mgcv)
+
     # data
     # BR <- st_read("./data/shp/natBR.shp") # boat ramps
     BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% # from BRtrips.R
@@ -60,6 +61,7 @@
     # models
     cons_mod <- readRDS("./models/cons_mod.rda")
     sp_mod <- readRDS("./models/sp_mod.rda")
+    bl_mod <- readRDS("./models/bl_mod.rda")
     
     # simulation
     sim_name <- "sim1"       #'[#NOTE: check simulation name]  
@@ -88,12 +90,46 @@ fuel %<>%
 dat %<>% left_join(fuel[, c("TripMonth", "numYear", "cost")])
 
 
+# Boat Length - need to fill in NAs where possible
+dat %<>% rename(PartySize = Party)
+tmp <- dat %>% filter(is.na(BoatLength) & SiteType == "Boat") %>% dplyr::select(TripID, BoatLength, PartySize)
+# unique(tmp$Party)
+
+# Filling Party size where it exists
+tmp %<>% mutate(PartySize = ifelse(PartySize %in% c("6f", "Two couples 2 kids", "3F, 2M, 1b"), 6, 
+                                    ifelse(PartySize %in% c("2f", "2 dudes", "2males", "Couple", "1M 1b"), 2, 
+                                           ifelse(PartySize %in% c("2f, 2kids", "4 friends", "2 couples", "4 mates", "1m1b", "Couple, 2g", "Couple,2g 1b"), 4,
+                                                  ifelse(PartySize %in% c("Man", "1M"), 1, 
+                                                         ifelse(PartySize %in% c("2b1g", "3M", "3m"), 3, NA))))))
+
+      tmp$lm_bl <- predict(bl_mod, tmp) # predicting boatlength using party size
+      tmp$lm_bl <- round(as.numeric(tmp$lm_bl), 2)
+      dat %<>%  left_join(tmp[, c("TripID", "lm_bl")])
+      
+      dat %<>% 
+        mutate(BoatLength = ifelse(SiteType == "Boat" & !is.na(lm_bl), lm_bl, BoatLength)) %>% # appending modelled boat length
+        mutate(BoatLength = ifelse(SiteType == "Boat" & is.na(BoatLength), mean(BoatLength, na.rm = T), BoatLength)) # filling rest of boat length with NAs
+        
 # VOTT 
- dat %<>% 
-   left_join(vott[, c("Postcode", "ann_inc", "VOTT")]) %>% 
-   mutate(ann_inc = mean(ann_inc, na.rm = TRUE), ann_inc) %>% 
-   mutate(VOTT = mean(VOTT, na.rm = TRUE), VOTT)
-   
+    dat %<>% left_join(vott[, c("Postcode", "ann_inc_21", "VOTT_21")]) 
+
+    tmp <- dat %>% filter(!is.na(ann_inc_21) & !is.na(BoatLength)) %>% mutate(ann_inc_21 = as.numeric(ann_inc_21))
+
+    lm_ann_inc <- lm(ann_inc_21 ~ BoatLength, data = tmp)
+    
+
+      ggplot(dat = tmp, aes(x = ann_inc_21, y = BoatLength)) +
+        geom_point() +
+        stat_smooth(method = "lm")
+      
+      dat$lm_ann_inc <- predict(lm_ann_inc, dat)
+      
+      # mean(vott$ann_inc_21, na.rm = T) - mean(vott$ann_inc_16, na.rm = T)
+      
+      dat %<>%
+        mutate(ann_inc = ifelse(!is.na(ann_inc_21), ann_inc_21, lm_ann_inc)) %>% 
+        mutate(ann_inc = ifelse(is.na(ann_inc), mean(ann_inc, na.rm = T), ann_inc)) %>% 
+        mutate(VOTT = round(ann_inc/(38*52), 2))
  
  # Consumption
 boat_perf %<>%  
@@ -114,7 +150,7 @@ boat2L <- boat_perf %>%
             cons2l = median(cons))
   
 dat %<>% 
-   mutate(BoatLength = ifelse(is.na(BoatLength), mean(BoatLength, na.rm = TRUE), BoatLength)) %>%
+   # mutate(BoatLength = ifelse(is.na(BoatLength), mean(BoatLength, na.rm = TRUE), BoatLength)) %>%
   mutate(boat_size2L = ifelse(BoatLength <= 3.75, "S", "L")) %>%
   mutate(boat_size3L = ifelse(BoatLength <= 3.75, "S", 
                             ifelse(BoatLength <= 6.75, "M", "L"))) %>% 
@@ -139,7 +175,7 @@ dat %<>%
       dat$gam_sp <- as.numeric(gam_sp)
 
 
-rm(fuel, boat2L, boat3L, vott, temp, gam_cons, sp_cons, cons_mod, sp_mod)
+rm(fuel, boat2L, boat3L, vott, temp, gam_cons, sp_cons, cons_mod, sp_mod, tmp, bl_mod)
 ```
 
 All data filters have to be done before making the choice set.
@@ -161,12 +197,6 @@ All data filters have to be done before making the choice set.
     
       #'[#VALIDATE: TRUE, no duplicated trip IDs)]
       identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
-      
-      dat %<>%
-        filter(!is.na(BoatLength))
-      
-      ggplot()+
-        geom_sf(data = dat)
 ```
 
 
@@ -238,7 +268,7 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
 
 
 ```{r}
-st_geometry(grid) <- "geom"
+# st_geometry(grid) <- "geom"
 
  grid <-  ascAtt(ascGrid = grid, grid_id = "gridID_alt", point = dat, br = BRtrips, br_id = "RampID",
               crs = 4283)
@@ -251,6 +281,27 @@ st_geometry(grid) <- "geom"
     grid <- left_join(grid, km_mainland) %>% 
       rename(offshore_dist = km_mainland)
 ```
+
+### Land Present
+
+```{r land present}
+coast$area <- as.numeric(set_units(st_area(coast), km^2)) # area of polygons in coast sf
+
+# Distance from mainland
+# Adjacent to land
+## extracting islands from coast polygon
+islands <- coast %>%                                    
+  arrange(desc(area))  %>% 
+  slice(2:nrow(coast))
+  
+## create binary column indicating whether grid cell is adjacent to island
+grid %<>% 
+  mutate(isl_adj = ifelse(as.list(st_intersects(grid, islands)) %in% "integer(0)", 0, 1))
+
+ggplot() +
+  geom_sf(data = grid$asc_geom, aes(fill = as.factor(grid$isl_adj)))
+```
+
 ## Data wrangle
 ```{r}
     # isolating grid ID to append to dat
