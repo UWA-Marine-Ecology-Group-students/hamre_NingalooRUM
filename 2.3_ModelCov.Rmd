@@ -1,4 +1,7 @@
+# Setup
 ```{r setup}
+rm(list = ls())
+
 # knitr options
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width = 10, fig.height = 7) 
 
@@ -12,79 +15,101 @@ library(gam)
 library(mgcv)
 library(ggplot2)
 library(FSSgam)
+library(corrplot)
+library(corrr)
+library(tidyverse)
+library(magrittr)
+library(sf)
 # library(ggBRT)
-
 
 # functions
 source("./functions/brtFunc.R")
+source("./functions/theme.R")
 
 # data
-dat <- read.csv("./data/02_data/2.1_dat.csv")
+full_dat <- read.csv("./data/02_data/2.1_dat.csv")
+sp_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")
 ```
 
+# Data Prep
 ```{r data exploration}
-dat <- dat %>% 
-  # filter(FishingType %in% c("Casting", "Demersal")) %>% 
-  mutate(Dem = as.integer(Dem)) %>% 
-  filter(choice == 1)
+# Filter data
+dat <- full_dat %>% filter(choice == 1)
 
-# check for correlations
-  cor <- round(cor(dat[,c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef", "RReef", "Lagoon", "decDuration", "Dem")],
-                    use = 'complete.obs'), 2)
-  cor
+# Adding predictors
+dat <- dat %>% 
+  mutate(Dem = as.integer(Dem)) %>%
+  filter(Dem < 50) %>% 
+  mutate(demph = as.integer(Dem/decDuration)) %>% 
+  mutate(dem_bin = ifelse(Dem > 0, 1, 0))
+
+# Set the predictors for modeling
+pred.vars <- c("Dem", "Depth", "km_BR", "Pelagic", "Reef", "RReef", "Lagoon", "decDuration", "centroidLat") 
+
+# Check there is no NAs
+summary(dat[,pred.vars])
+
+# Check the correlations between predictor variables - remove if over 95
+correlate(dat[,pred.vars], use = "complete.obs") %>%  
+  gather(-term, key = "colname", value = "cor") %>% 
+  dplyr::filter(abs(cor) > 0.5)
+
+# Make depth positive
+  dat$Depth <- abs(dat$Depth)
   
-# Test transformations
-  dat$Depth <- abs(dat$Depth) # makes posotive
-  dat$centroidLat <- abs(dat$centroidLat)
-  
-  cont_cov <- c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef","Lagoon", "decDuration", "Dem") # continuous vars only
-  
-  # Plot transformations
-  # need to run in console
+# Plot transformations - need to run in console
   par(mfrow = c(3,4))
-  for (i in cont_cov) {
-    x <- dat[,i]
-    x = as.numeric(unlist(x))
-    hist((x))
-    plot((x), main = paste(i))
-    hist(sqrt(x))
-    plot(sqrt(x))
-    hist(log(x + 1))
-    plot(log(x + 1))
-    hist((x))
-    plot((x), main = paste(i))
-    hist((x)^2)
-    plot((x)^2)
-    hist((x)^3)
-    plot((x)^3)
+
+  for (i in pred.vars) {
+    
+    tryCatch({
+      
+       x <- dat[,i]
+       x = as.numeric(unlist(x))
+       hist((x))
+       plot((x), main = paste(i))
+       hist(sqrt(x))
+       plot(sqrt(x))
+       hist(log(x + 1))
+       plot(log(x + 1))
+       hist((x))
+       plot((x), main = paste(i))
+       hist((x)^2)
+       plot((x)^2)
+       hist((x)^3)
+       plot((x)^3)
+       
+    }, error = function(e) {
+      # Handle the error if necessary
+      print(paste("Unable to transform", i, ":", e))
+    }
+    )
   }
   
   # Make transformations
-  dat$Depth <- log(dat$Depth + 1)
-  dat$km_BR <- log(dat$km_BR + 1)
-  dat$Reef <- log(dat$Reef + 1)
-  dat$Lagoon <- log(dat$Lagoon + 1)
-  dat$decDuration <- sqrt(dat$decDuration)
-    
-    # define response
-    # dat %<>% mutate(dem_bin = ifelse(Dem != 0, 1, 0))
-    resp <- which(colnames(dat) == "Dem") # poisson
-    # resp <- which(colnames(dat) == "dem_bin") # bernoulli
-    
-    # defining covariates
-    cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef", "RReef", "Lagoon", "decDuration"))
+  dat$log.Depth <- log(dat$Depth + 1)
+  dat$log.km_BR <- log(dat$km_BR + 1)
+  dat$log.Reef <- log(dat$Reef + 1)
+  dat$log.RReef <- log(dat$RReef + 1)
+  dat$log.Lagoon <- log(dat$Lagoon + 1)
+  dat$sqrt.decDuration <- sqrt(dat$decDuration)
+  
+  # update predictors
+pred.vars <- c("log.Depth","log.km_BR", "Pelagic", "log.Reef", "log.RReef", "log.Lagoon", "sqrt.decDuration", "centroidLat") 
 ```
 
+# BRTs
+## BRT loop
+```{r}
+# define response
+  resp <- which(colnames(dat) == "Dem") # poisson
+  # resp <- which(colnames(dat) == "demph") # poisson
+  # resp <- which(colnames(dat) == "dem_bin") # bernoulli
 
-```{r data prep for BRTs}
-# making a grid for step.loop
-  res.dev <- c() ## make a res.dev variable to store in grid
-
-# make grid of lr, tc and bag.fraction that gbm.step will run through
-  step.loop <- expand.grid(lr = c(0.01, 0.05, 0.001), tc = c(2, 5, 7), bf = c(0.5, 0.75, 0.9), ss = c(5, 20, 30)) 
-
-  step.loop$res.dev <- NA ## add res.dev to grid
-
+# defining covariates
+  pred.vars <- c("Depth", "km_BR", "Pelagic", "Reef", "RReef", "Lagoon", "centroidLat", "decDuration") # covs for dem and dem_bin
+  # pred.vars <- c("Depth", "km_BR", "Pelagic", "Reef", "RReef", "Lagoon", "centroidLat") # covs fro demph (remove duration)
+    
 # Set up CV
   k = 10 #number of folds
   p <- unique(dat$PersonID)
@@ -92,785 +117,287 @@ dat <- dat %>%
   p$k <- c(rep(1:k, floor(nrow(p)/k)), sample(1:k, size = nrow(p) - length(rep(1:k, floor(nrow(p)/k)))))
   dat <- left_join(dat, p, by = "PersonID")
   table(dat$k) #k provides indicator for 10 fold cross validation
-```
 
-```{r dp.step loop, warning=FALSE}
-# This first gbm.step is looping through parameters so i can select the optimal model
-# for (i in 1:nrow(step.loop)) {
-#   mod <- dismo::gbm.step(data = dat,
-#                            gbm.x = c(cov), ## covariates
-#                            gbm.y = Dem, ## response 
-#                            fold.vector = dat$k,
-#                            n.folds = k,
-#                            lr = step.loop[i,"lr"], ## ref to step.loop
-#                            tree.complexity = step.loop[i,"tc"], ## ref to step.loop
-#                            family = "poisson", ## distribution family
-#                            bag.fraction = step.loop[i,"bf"],
-#                            step.size = step.loop[i, "ss"],
-#                            plot.main = F)
-#   step.loop[i, "res.dev"] <- step$self.statistics$mean.resid ### store res.dev in step.loop
-#   step.loop[i, "nt"] <- step$n.trees}
-# 
-# # Full loop data set if intere
-# # step.loop
-# opt.resdev <- step.loop[step.loop$res.dev==min(step.loop$res.dev, na.rm= T),]
-# opt.resdev <- opt.resdev %>% drop_na()
-# opt.resdev
-# opt.nt <- step.loop[step.loop$nt==max(step.loop$nt, na.rm= T),]
-# opt.nt <- opt.nt %>% drop_na()
-# opt.nt
-# 
-# opt <- full_join(opt.resdev, opt.nt)
-# opt <- opt %>% drop_na
-# opt
+# define parameters for gbm.step to loop over
+  step.loop <- expand.grid(lr = c(0.01, 0.001, 0.0001), # min
+                           tc = c(5, 7, 10), # 1-5
+                           bf = c(0.5, 0.65, 0.75), # max 0.75
+                           ss = c(3, 5, 7)) 
 
-  mod <- dismo::gbm.step(data = dat,
-                           gbm.x = c(cov), ## covariates
-                           gbm.y = resp, ## response 
-                           fold.vector = dat$k,
-                           # offset = dat$decDuration,
-                           n.folds = k,
-                           lr = 0.01, 
-                           tree.complexity = 3, 
-                           family = "poisson", ## distribution family
-                           bag.fraction = 0.5,
-                           step.size = 5,
-                           plot.main = F)
-                       
+  step.loop$n.trees <- NA ## add res.dev to grid
+  step.loop$res.dev <- NA ## add res.dev to grid
+  
+  nmods <- nrow(step.loop)
+  print(paste0("Making ", nmods, " models"))
 
+for (i in 1:nrow(step.loop)) {
+  print(i)
   
-brtparams <- c() 
-brtparams$learning.rate <- 0.001
-brtparams$tree.complexity <- 10
-brtparams$bag.fraction <- 0.75
-brtparams$number.of.trees <- mod$n.trees # adds number of trees to step param
-brtparams$res.dev  <- mod$self.statistics$mean.resid # updates residual devience
-brtparams$discrimination <- mod$self.statistics$discrimination
-brtparams
-
-summary(mod)
-
-gbm.simplify(mod, n.folds = k)
-
-
- # removing RReef because of coorelation 
-
-cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef", "Lagoon", "decDuration"))
-    
-  mod2 <- dismo::gbm.step(data = dat,
-                           gbm.x = c(cov), ## covariates
-                           gbm.y = resp, ## response 
-                           fold.vector = dat$k,
-                           # offset = dat$decDuration,
-                           n.folds = k,
-                           lr = 0.01, 
-                           tree.complexity = 3, 
-                           family = "poisson", ## distribution family
-                           bag.fraction = 0.5,
-                           step.size = 5,
-                           plot.main = F)
-  
-  gbm.simplify(mod2, n.folds = k)
-  
-  summary(mod2)
-  
-  mod2$self.statistics$mean.resid # updates residual devience
-  
-  
-   # removing all habitats - couldnt get to run 
-
-# cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "decDuration"))
-#     
-#   mod3 <- dismo::gbm.step(data = dat,
-#                            gbm.x = c(cov), ## covariates
-#                            gbm.y = resp, ## response 
-#                            fold.vector = dat$k,
-#                            # offset = dat$decDuration,
-#                            n.folds = k,
-#                            lr = 0.001, 
-#                            tree.complexity = 5, 
-#                            family = "poisson", ## distribution family
-#                            bag.fraction = 0.75,
-#                            step.size = 1,
-#                           n.trees = 100,
-#                            plot.main = F)
-#   
-#   gbm.simplify(mod2, n.folds = k)
-  
-  # # add decduration in as offset with all but RReef
-  # 
-  # cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef", "Lagoon"))
-  # 
-  # offset <- dat$decDuration
-  #   
-  # mod3 <- dismo::gbm.step(data = dat,
-  #                          gbm.x = c(cov), ## covariates
-  #                          gbm.y = resp, ## response 
-  #                          fold.vector = dat$k,
-  #                          offset = offset,
-  #                          n.folds = k,
-  #                          lr = 0.001, 
-  #                          tree.complexity = 5, 
-  #                          family = "poisson", ## distribution family
-  #                          bag.fraction = 0.75,
-  #                          step.size = 3,
-  #                          plot.main = F)
-  # 
-  # gbm.simplify(mod2, n.folds = k)
-  
-  
-    # add decduration in as offset with all but RReef
-  
-  cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef", "Lagoon"))
-  
-  offset <- dat$decDuration
-    
-  mod3 <- dismo::gbm.step(data = dat,
-                           gbm.x = c(cov), ## covariates
-                           gbm.y = resp, ## response 
-                           fold.vector = dat$k,
-                           offset = offset,
-                           n.folds = k,
-                           lr = 0.01, 
-                           tree.complexity = 3, 
-                           family = "poisson", ## distribution family
-                           bag.fraction = 0.5,
-                           step.size = 5,
-                           plot.main = F)
-  
-  summary(mod3)
-  mod3
-  gbm.simplify(mod3, n.folds = k)
-  
-mod3$self.statistics$mean.resid # updates residual devience
-
-# remove habitat vars
-  
-  cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat"))
-  
-  offset <- dat$decDuration
-    
-  mod3 <- dismo::gbm.step(data = dat,
-                           gbm.x = c(cov), ## covariates
-                           gbm.y = resp, ## response 
-                           fold.vector = dat$k,
-                           offset = offset,
-                           n.folds = k,
-                           lr = 0.01, 
-                           tree.complexity = 3, 
-                           family = "poisson", ## distribution family
-                           bag.fraction = 0.5,
-                           step.size = 5,
-                           plot.main = F)
-  
-  summary(mod3)
-  mod3
-  gbm.simplify(mod3, n.folds = k)
-  
-mod3$self.statistics$mean.resid # updates residual devience
-
-# 
-
-dat$demph <- as.integer(dat$Dem/dat$decDuration)
-dat <- dat %>% mutate(demph_bin = ifelse(demph == 0, 0, 1))
-  
-  cov <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "Pelagic", "Reef", "Lagoon"))
-  
-   resp <- which(colnames(dat) == "demph")
-   resp <- which(colnames(dat) == "demph_bin")
-   
-  mod4 <- dismo::gbm.step(data = dat,
-                           gbm.x = c(cov), ## covariates
-                           gbm.y = resp, ## response 
-                           # fold.vector = dat$k,
-                           # n.folds = k,
-                           lr = 0.001, 
-                           tree.complexity = 5, 
-                           family = "bernoulli", ## distribution family
-                           bag.fraction = 0.75,
-                           step.size = 3,
-                           plot.main = F)
-  
-  summary(mod3)
-  mod3
-  gbm.simplify(mod3, n.folds = k)
-  
-mod3$self.statistics$mean.resid # updates residual devience
-```
-
-### Zeros
-Aiming to have less than 80% zeros in resposne
-```{r zeros}
-unique.vars = unique(as.character(dat$Dem))
-unique.vars.use = character()
-
-for (i in 1:length(unique.vars)) {
-  temp.dat = dat[which(dat$Dem == unique.vars[i]),]
-  if (length(which(temp.dat$response == 0))/nrow(temp.dat) < 0.8) {
-    unique.vars.use = c(unique.vars.use,unique.vars[i])}
+  tryCatch(
+    {
+      result <- gbm.step(data = dat,
+                         gbm.x = pred.vars, ## covariates
+                         gbm.y = resp, ## response
+                         fold.vector = dat$k,
+                         n.folds = k,
+                         lr = step.loop[i, "lr"], ## ref to step.loop
+                         tree.complexity = step.loop[i, "tc"], ## ref to step.loop
+                         family = "poisson", ## distribution family
+                         bag.fraction = step.loop[i, "bf"],
+                         step.size = step.loop[i, "ss"],
+                         plot.main = FALSE,
+                         silent = T)
+      
+      step.loop[i, "nt"] <- result$n.trees
+      step.loop[i, "res.dev"] <- result$self.statistics$mean.resid ### store res.dev in step.loop
+      
+      step.loop %<>% arrange(res.dev)
+    },
+    error = function(e) {
+      # Handle the error if necessary
+      print(paste("Error occurred in iteration", i, ":", e))
+    }
+  )
 }
-unique.vars.use  
-
-# 60% zeros - all good
 ```
 
-## Setting up models
-```{r GAMMs}
+## Separate BRTs
+```{r dp.step loop, warning=FALSE}
+## Demersal catch
+resp <- c("Dem") # poisson
+pred.vars <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "decDuration"))
 
+dem_mod <- dismo::gbm.step(data = dat,
+                           gbm.x = pred.vars, ## covariates
+                           gbm.y = resp, ## response 
+                           fold.vector = dat$k,
+                           # offset = dat$decDuration,
+                           n.folds = k,
+                           lr = 0.0001, 
+                           tree.complexity = 5, 
+                           family = "poisson", ## distribution family
+                           bag.fraction = 0.75,
+                           step.size = 2
+                         )
+
+## demersal catch binary
+resp <- which(colnames(dat) %in% "dem_bin") # bernoulli
+pred.vars <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat", "decDuration"))
+
+
+dem_bin_mod <- dismo::gbm.step(data = dat,
+                           gbm.x = pred.vars, ## covariates
+                           gbm.y = resp, ## response 
+                           family = "bernoulli",
+                           tree.complexity = 5,
+                           learning.rate = 0.01,
+                           bag.fraction = 0.5,
+                           step.size = 3,
+                           fold.vector = dat$k,
+                           n.folds = k,
+                         )
+
+
+## Demersal catch per hour
+resp <- which(colnames(dat) == "demph") # poisson
+pred.vars <- which(colnames(dat) %in% c("Depth", "km_BR", "centroidLat"))
+
+dem_mph_mod <- dismo::gbm.step(data = dat,
+                           gbm.x = pred.vars, ## covariates
+                           gbm.y = resp, ## response 
+                           fold.vector = dat$k,
+                           n.folds = k,
+                           lr = 0.01, 
+                           tree.complexity = 3, 
+                           family = "poisson", ## distribution family
+                           bag.fraction = 0.5,
+                           step.size = 5,
+                           n.trees = 1000)
+```
+
+
+# FSS gams
+### Gam prep
+Need less than 80% zeros in response
+```{r zeros}
+# For if you hav e one column with multiply responses
+# unique.vars <- unique(as.character(dat$scientific)) 
+# 
+# resp.vars <- character()
+# for(i in 1:length(unique.vars)){
+#   temp.dat <- dat[which(dat$scientific == unique.vars[i]), ]
+#   if(length(which(temp.dat$maxn == 0)) / nrow(temp.dat) < 0.8){ # Change here
+#     resp.vars <- c(resp.vars, unique.vars[i])}
+# }
+# resp.vars   
+
+# For when you only have one response
+# define response
+resp <- dat$Dem # 81% zeros
+# resp <- dat$demph # 86% zeros
+
+zeros <- round(nrow(dat[which(resp == 0),])/nrow(dat)*100, 2)
+
+ggplot() +
+  geom_histogram(data = dat, aes(x = Dem), fill = "darkturquoise") +
+  xlab("Demersal Catch") +
+  ylab("Frequency") +
+  annotate("text", x = 0, y = 100, label = paste0(zeros, "% zeros"), angle = 90) +
+  theme_classic()
+```
+
+## Model selection
+  - k is knows determines out wavy we allow the line to be - the higher the knots the smoother and more risk of over fitting: max 5
+  - cr is a cubic spline
+  - re = random effect
+
+```{r GAMMs}
+# creating  empty lists
 out.all <- list()
 var.imp <- list()
 fss.all = list()
 top.all = list()
-resp.vars = unique.vars.use
+# resp.vars = unique.vars.use
 
-# k is knows determines out wigglgying we allow the line to be - ther higher the knots the smoother
-# cr is structure we give to n caught
-# re = random effect
+# test model
+test_fit <- gam(Dem ~ s(log.Depth, k = 3, bs = 'cr') + s(PersonID, bs = 're'), family = 'poisson', data = dat)
 
-dat$demph <- as.integer(dat$Dem/dat$decDuration)
-dat <- dat %>% mutate(demph_bin = ifelse(demph == 0, 0, 1))
-
-mod1 <- gam(demph ~ s(Depth, k = 3, bs = 'cr') + s(centroidLat, k = 3, bs = 'cr') + s(km_BR, k = 3, bs = 'cr') + s(Pelagic, k = 3, bs = 'cr') + s(Reef, k = 3, bs = 'cr') + 
-              s(RReef, k = 3, bs = 'cr') + s(Lagoon, k = 3, bs ='cr') + s(PersonID, bs = 're'), family = 'poisson', data = dat)
-
-summary(mod1)
-
+# model selection
 model.set <- generate.model.set(use.dat = dat, 
-                                test.fit = mod1, 
-                                pred.vars.cont = cont_cov, 
-                                # pred.vars.fact = DPfac, 
-                                max.predictors = 3, 
+                                test.fit = test_fit, 
+                                pred.vars.cont = pred.vars, 
+                                max.predictors = 5,
                                 k = 3, 
                                 null.terms = "s(PersonID, bs = 're')", 
                                 smooth.smooth.interactions = F, 
                                 factor.factor.interactions = F,
                                 cov.cutoff =  T)
 
-# add Cov.cutoff
 
-out.list <- fit.model.set(model.set, max.models = 600, parallel = T)
-
-names(out.list)
-#names(out.list)
- # examine the list of failed models
- #out.list$failed.models
- #out.list$success.models
- fss.all=c(fss.all,list(out.list))
- mod.table=out.list$mod.data.out
- mod.table=mod.table[order(mod.table$AICc),]
- out.i=mod.table
- out.all=c(out.all,list(out.i))
- var.imp=c(var.imp,list(out.list$variable.importance$aic$variable.weights.raw))
- all.less.2AICc=mod.table[which(mod.table$delta.AICc<2),]
- top.all=c(top.all,list(all.less.2AICc))
-
-all.mod.fits=do.call("rbind",out.all)
-all.var.imp=do.call("rbind",var.imp)
-top.mod.fits=do.call("rbind",top.all)
+  out.list <- fit.model.set(model.set, max.models = 600, parallel = T)
+  names(out.list)
+  
+  out.list$failed.models # examine the list of failed models
+  mod.table <- out.list$mod.data.out  # look at the model selection table
+  mod.table <- mod.table[order(mod.table$AICc), ]
+  mod.table$cumsum.wi <- cumsum(mod.table$wi.AICc)
+  out.i   <- mod.table[which(mod.table$delta.AICc <= 2), ]
+  out.all <- c(out.all,list(out.i))
+  var.imp <- c(var.imp,list(out.list$variable.importance$aic$variable.weights.raw)) # Or importance score weighted by r2
+  
+  # plot the best models
+  for (m in 1:nrow(out.i)) {
+    best.model.name = as.character(out.i$modname[m])
+    if (best.model.name != "null") {
+      # par(mfrow = c(3, 1), mar = c(9, 4, 3, 1))
+      best.model = out.list$success.models[[best.model.name]]
+      plot <- plot(best.model,all.terms = T, pages = 1, residuals = T, pch = 16)
+      # mtext(side = 2, text = resp.vars[i], outer = F)
+      
+      pred_plots <- plot[[m]]
+      }  
+  }
+  
+  
+  all.mod.fits   <- do.call("rbind",out.all)
+  all.var.imp    <- do.call("rbind",var.imp)
 ```
-
-## Top Model & Predictions
+## Top Model
 ```{r}
-######### Predict and plot ..#########
-# gam.site<-gam(response~s(bathymetry,k=3,bs='cr')+s(cube.Aspect,k=5,bs='cr') + status +
-#                  s(site,bs="re"), family=tw(),data=legal.dat)
-
-gam1 <- gam(nDP ~ s(Depth_logxplusone, by = facYear, k = 3, bs = "cr") + s(DistNearestBRkm_logxplusone, by = facYear, k = 3, bs = "cr") + facYear + 
-              s(nHooked, k = 5, bs ="cr") + s(PersonID, bs = "re"), family = "poisson", data = dpdat2)
-
-# predict bathymetry from model
-mod<-gam1
-testdata <- expand.grid(Depth_logxplusone=seq(min(dpdat2$Depth_logxplusone),max(dpdat2$Depth_logxplusone), length.out = 10),
-                        DistNearestBRkm_logxplusone=seq(min(dpdat2$DistNearestBRkm_logxplusone),max(dpdat2$DistNearestBRkm_ogxplusone), length.out=10),
-                        nHooked=seq(min(dpdat2$nHooked),max(dpdat2$nHooked), length.out = 10),
-                        facYear=(mod$model$facYear),
-                        PersonID=(mod$model$PersonID)) %>%
-  distinct()%>%
-  glimpse()
-
-fits <- predict.gam(mod, newdata=testdata, type='response', se.fit=T)
-```
-
-### Year Predictions
-```{r}
-predicts.year = testdata%>%data.frame(fits)%>%
-  dplyr::group_by(facYear)%>% #only change here
-  dplyr::summarise(response=mean(fit),se.fit=mean(se.fit))%>%
-  dplyr::ungroup()
-write.csv(predicts.year, paste(dpGAM, "predict.year.csv", sep = "/")) #there is some BUG in dplyr - that this fixes
-predicts.year<-read.csv(paste(dpGAM, "predict.year.csv", sep = "/")) %>%
-  dplyr::mutate(facYear = as.factor(facYear)) %>%
-  glimpse()
-
-# Plot year
-ggmod.gam.year<- ggplot(aes(x = facYear, y = response), data = predicts.year) +
-  ylab("Predicted number of fish depredated") + 
-  xlab('Year') +
-  # geom_violin(data = predicts.year, aes()) +
-  scale_x_discrete(limits = rev(levels(predicts.year$year)))+
-  geom_errorbar(data = predicts.year, aes(ymin = response - se.fit, ymax = response + se.fit), width = 0.5) +
-  theme_classic()
-ggmod.gam.year
-```
-
-### Depth Predictions
-```{r}
-# Calculating standard error
-predicts.depth = testdata%>%data.frame(fits)%>%
-  dplyr::group_by(Depth_logxplusone, facYear)%>% #only change here
-  dplyr::summarise(response=mean(fit),se.fit=mean(se.fit))%>%
-  dplyr::ungroup() 
-write.csv(predicts.depth, paste(dpGAM, "predict.depth.csv", sep = "/")) #there is some BUG in dplyr - that this fixes
-predicts.depth<-read.csv(paste(dpGAM, "predict.depth.csv", sep = "/")) %>%
-  dplyr::mutate(facYear = as.factor(facYear)) %>% 
-  glimpse()
-
-# Plot depth
-ggmod.gam.depth <- ggplot() +
-  ylab("Predicted number of fish depredated")+
-  xlab("Depth (m, log + 1)")+
-  geom_ribbon(data = predicts.depth, aes(x = Depth_logxplusone,y = response, ymax= response + se.fit, ymin =
-                                            response - se.fit, xmin = 0, xmax = 6, group = facYear,
-                                            fill = facYear, colour = facYear),alpha = 0.2, show.legend = T) +
-  geom_point(data = predicts.depth, aes(x = Depth_logxplusone, y = response, colour = facYear),  alpha =
-               0.75, size=2, show.legend = F) +
-  geom_line(data=predicts.depth,aes(x = Depth_logxplusone,y = response, group = facYear, color = facYear), alpha = 0.75, show.legend = F) +
-  scale_fill_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  scale_color_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  theme_classic()
-  # annotate("text", x = -Inf, y=Inf, label = "(c)",vjust = 1, hjust = -.1,size=5)
-ggmod.gam.depth
-```
-
-
-### Distance to Nearest Boat Ramp Predictions
-```{r}
-# Calculating standard error
-predicts.br = testdata%>%data.frame(fits)%>%
-  dplyr::group_by(DistNearestBRkm_logxplusone, facYear)%>% #only change here
-  dplyr::summarise(response=mean(fit),se.fit=mean(se.fit))%>%
-  dplyr::ungroup()
-write.csv(predicts.br, paste(dpGAM, "predict.br.csv", sep = "/")) #there is some BUG in dplyr - that this fixes
-predicts.br<-read.csv(paste(dpGAM, "predict.br.csv", sep = "/")) %>%
-  dplyr::mutate(facYear = as.factor(facYear)) %>%
-  glimpse()
-
-# Plot distnace to nearest boat ramp
-ggmod.gam.br<- ggplot() +
-  ylab("Predicted number of fish depredated")+
-  xlab('Distance to nearest boat ramp (km, log + 1)')+
-  geom_ribbon(data = predicts.br, aes(x = DistNearestBRkm_logxplusone,y = response, ymax= response + se.fit, ymin =
-                                            response - se.fit, xmin = 0, xmax = 6, group = facYear,
-                                            fill = facYear, colour = facYear),alpha = 0.2, show.legend = T) +
-  geom_point(data = predicts.br, aes(x = DistNearestBRkm_logxplusone, y = response, colour = facYear),  alpha =
-               0.75, size=2, show.legend = F) +
-  geom_line(data=predicts.br,aes(x = DistNearestBRkm_logxplusone,y = response, group = facYear, color = facYear), alpha = 0.75, show.legend = F) +
-  scale_fill_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  scale_color_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  theme_classic()
-ggmod.gam.br
-```
-```{r}
-write.csv(all.var.imp, paste(dpGAM, "all.var.imp.csv", sep= "/"))
-
-dat.var.imp <-read.csv(paste(dpGAM, "all.var.imp.csv", sep= "/"))%>% #from local copy
-  rename(resp.var=X)%>%
-  gather(key=predictor,value=importance,2:ncol(.))%>%
-  mutate(Model = "Depredation") %>% 
-  glimpse()
-
-dat.var.label<-dat.var.imp%>%
-  mutate(label=NA)%>%
-  mutate(label=ifelse(predictor=="facYear", "X",label))%>%
-  mutate(label=ifelse(predictor=="Depth_logxplusone", "X",label))%>%
-  mutate(label=ifelse(predictor=="DistNearestBRkm_logxplusone", "X",label))%>%
-  glimpse()
-
-legend_title <- "Importance"
-
-re <- colorRampPalette(c("#97c1a9","#cce2bc"))(200)
+all.var.imp %<>% 
+  as.data.frame() %>% 
+  gather(key = predictor, value = importance) %>%
+  mutate(model = "Catch") %>% 
+  arrange(desc(importance))
 
 # Plot gg.importance.scores
-gg.importance.scores <- ggplot(dat.var.label, aes(x=predictor, y=Model,fill=importance)) +
-  geom_tile(show.legend=T) +
-  scale_fill_gradientn(legend_title, colours=c("white", re), na.value = "grey98",
-                       limits = c(0, max(dat.var.label$importance))) +
-  scale_x_discrete(limits=c("nTimesLast24m","exDecMedianTime_sqrt","Depth_logxplusone","DistNearestBRkm_logxplusone","DecFishingHr_sqrt","MaxHook_sqrt", "BoatLength",
-                            "b_kdens_sqrt", "Month", "Side", "facYear", "Habitat",  "FishingType"),
-                   labels=c("Visits in last 24 months","Time of Day Fishing (sqrt)","Depth (m, log + 1 )","Distance to boat ramp (km, log + 1)","Hours fishing (sqrt)","Maximum hook depth (sqrt)", "Boat Length (m)",
-                            "Boat Kernal Density (sqrt)", "Month", "Side", "Year", "Habitat",  "Fishing Type"), guide = guide_axis(angle = 45)) +
-  xlab(NULL) +
-  ylab(NULL) +
-  theme_classic() +
-  geom_text(aes(label=label))
+  ggplot(all.var.imp, aes(y = reorder(predictor, importance), x = importance, fill = importance)) +
+    geom_col(show.legend = F) +
+    xlab("Importance") +
+    ylab("Predictor") +
+    theme_classic()
   
-gg.importance.scores
-```
-## Model 2 & Predictions
+# Make top model
+topmod <- gam(Dem ~ 
+                s(log.Depth, k = 3, bs = 'cr') + 
+                s(sqrt.decDuration, k = 3, bs = 'cr') +
+                s(centroidLat, k = 3, bs = 'cr') + 
+                s(log.Reef, k = 3, bs = 'cr') +
+                s(log.Lagoon, k = 3, bs = 'cr') + 
+                s(PersonID, bs = 're'), 
+              family = 'poisson', 
+              data = dat)
 
+summary(topmod)
+AIC(topmod)
+```
+
+## Predictions
 ```{r}
-# Reset continuous predictor names and add coords
-DPcont <- c("nTimesLast24m","exDecMedianTime_sqrt",
-           "Depth_logxplusone","DistNearestBRkm_logxplusone", "DistNearestInfra_sqrt", "UseLat",
-           "UseLong", "DecFishingHr_sqrt","MaxHook_sqrt",
-           "BoatLength", "b_kdens_sqrt", "b_5km_logxplusone")
+ # Make transformations
+  full_dat$Depth <- abs(full_dat$Depth)
+  full_dat$log.Depth <- log(full_dat$Depth + 1)
+  full_dat$log.Reef <- log(full_dat$Reef + 1)
+  full_dat$log.Lagoon <- log(full_dat$Lagoon + 1)
+  full_dat$sqrt.decDuration <- sqrt(full_dat$decDuration)
 
+# Predict model onto big data
+full_dat <- cbind(full_dat, 
+                "p_dem" = predict(topmod, newdata = full_dat, type = 'response', se.fit = T))
 
-dpdat2 %>% 
-  select(-UseLat) %>% 
-    filter(if_any(where(is.numeric), ~ .x <0)) # make sure there are no negatives
+full_dat %<>% 
+  mutate(p_dem.fit = round(p_dem.fit, 2), p_dem.se.fit = round(p_dem.se.fit, 2))
 
-dem <- dpdat2 %>% 
-  filter(FishingType %in% "Demersal")
-# resenting to see if negatives in use lat are problem 
-DPcont <- c("nTimesLast24m","exDecMedianTime_sqrt",
-           "DistNearestBRkm_logxplusone", "DistNearestInfra_sqrt","DecFishingHr_sqrt","MaxHook_sqrt",
-           "BoatLength", "b_kdens_sqrt")
-
-DPfac <- c("Month", "facYear", "Habitat") # factors
-
-out.all <- list()
-var.imp <- list()
-fss.all=list()
-top.all=list()
-resp.vars=unique.vars.use
-
-# k is knows determines out wigglgying we allow the line to be 
-# cr is structure we give to n caught
-# re = random effect
-
-model1 <- gam(nDP~s(nHooked, k=3, bs='cr')+
-                s(PersonID, bs='re'), family='poisson', data = dem)
-
-model.set <- generate.model.set(use.dat = dem, test.fit = model1, pred.vars.cont = DPcont, pred.vars.fact = DPfac, max.predictors = 5, k=3, null.terms = "s(nHooked, k=5,
-                                bs='cr')+s(PersonID, bs='re')", smooth.smooth.interactions = F, factor.factor.interactions=F)
-
-out.list <- fit.model.set(model.set, max.models = 600, parallel = T)
-
-names(out.list)
-#names(out.list)
- # examine the list of failed models
- #out.list$failed.models
- #out.list$success.models
- fss.all=c(fss.all,list(out.list))
- mod.table=out.list$mod.data.out
- mod.table=mod.table[order(mod.table$AICc),]
- out.i=mod.table
- out.all=c(out.all,list(out.i))
- var.imp=c(var.imp,list(out.list$variable.importance$aic$variable.weights.raw))
- all.less.2AICc=mod.table[which(mod.table$delta.AICc<2),]
- top.all=c(top.all,list(all.less.2AICc))
-
-all.mod.fits=do.call("rbind",out.all)
-all.var.imp=do.call("rbind",var.imp)
-top.mod.fits=do.call("rbind",top.all)
+# Check summary
+summary(full_dat$p_dem.fit)
 ```
 
+## Predictor plots
 ```{r}
-gam2 <- gam(nDP ~ s(DecFishingHr_sqrt, by = Month, k = 3, bs = "cr") + s(DistNearestInfra_sqrt, by = Month, k = 3, bs = "cr") + s(MaxHook_sqrt, by = Month, k = 3, bs = "cr") + s(nTimesLast24m, by = Month, k = 3, bs = "cr") + Month + s(nHooked, k = 5, bs = "cr") + s(PersonID, bs = "re"), family = "poisson", data = dem)
-
-# predict bathymetry from model
-mod<-gam2
-testdata <- expand.grid(DecFishingHr_sqrt=seq(min(dem$DecFishingHr_sqrt),max(dem$DecFishingHr_sqrt), length.out = 4),
-                        DistNearestInfra_sqrt=seq(min(dem$DistNearestInfra_sqrt),max(dem$DistNearestInfra_sqrt), length.out=4),
-                        MaxHook_sqrt=seq(min(dem$MaxHook_sqrt),max(dem$MaxHook_sqrt), length.out=4),
-                        nTimesLast24m=seq(min(dem$nTimesLast24m),max(dem$nTimesLast24m), length.out=4),
-                        nHooked=seq(min(dem$nHooked),max(dem$nHooked), length.out = 4),
-                        Month=(mod$model$Month),
-                        PersonID=(mod$model$PersonID)) %>%
-  distinct()%>%
-  glimpse()
-
-fits <- predict.gam(mod, newdata=testdata, type='response', se.fit=T)
-```
-
-### Year Predictions
-```{r}
-predicts.month = testdata%>%data.frame(fits)%>%
-  dplyr::group_by(Month)%>% #only change here
-  dplyr::summarise(response=mean(fit),se.fit=mean(se.fit))%>%
-  dplyr::ungroup()
-write.csv(predicts.month, paste(dpGAM, "predict.month.csv", sep = "/")) #there is some BUG in dplyr - that this fixes
-predicts.month<-read.csv(paste(dpGAM, "predict.month.csv", sep = "/")) %>%
-  dplyr::mutate(month = as.factor(Month)) %>%
-  glimpse()
-
-# Plot month
-ggmod.gam.month<- ggplot(aes(x = month, y = response), data = predicts.month) +
-  ylab("Predicted number of fish depredated") + 
-  xlab('Month') +
-  # geom_violin(data = predicts.month, aes()) +
-  scale_x_discrete(limits = rev(levels(predicts.month$Month)))+
-  geom_errorbar(data = predicts.month, aes(ymin = response - se.fit, ymax = response + se.fit), width = 0.5) +
-  theme_classic()
-ggmod.gam.month
-```
-
-### Depth Predictions
-```{r}
-# Calculating standard error
-predicts.DecFishingHr = testdata%>%data.frame(fits)%>%
-  dplyr::group_by(DecFishingHr_sqrt, Month)%>% #only change here
-  dplyr::summarise(response=mean(fit),se.fit=mean(se.fit))%>%
-  dplyr::ungroup() %>% 
-  glimpse()
-write.csv(predicts.DecFishingHr, paste(dpGAM, "predict.DecFishingHr.csv", sep = "/")) #there is some BUG in dplyr - that this fixes
-predicts.DecFishingHr<-read.csv(paste(dpGAM, "predict.DecFishingHr.csv", sep = "/")) %>%
-  dplyr::mutate(Month = as.factor(Month)) %>% 
-  glimpse()
-
-# Plot depth
-ggmod.gam.DecFishingHr <- ggplot() +
-  ylab("Predicted number of fish depredated")+
-  xlab("Time spent fishing")+
-  geom_ribbon(data = predicts.DecFishingHr, aes(x = DecFishingHr_sqrt,y = response, ymax= response + se.fit, ymin =
-                                            response - se.fit, xmin = 0, xmax = 6, group = Month,
-                                            fill =  Month, colour = Month),alpha = 0.2, show.legend = T) +
-  geom_point(data = predicts.DecFishingHr, aes(x = DecFishingHr_sqrt, y = response, colour = Month),  alpha =
-               0.75, size=2, show.legend = F) +
-  geom_line(data=predicts.DecFishingHr,aes(x = DecFishingHr_sqrt,y = response, group = Month, color = Month), alpha = 0.75, show.legend = F) +
-  # scale_fill_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  # scale_color_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  theme_classic()
-  # annotate("text", x = -Inf, y=Inf, label = "(c)",vjust = 1, hjust = -.1,size=5)
-ggmod.gam.DecFishingHr
-```
-
-
-### Distance to Nearest Boat Ramp Predictions
-```{r}
-# Calculating standard error
-predicts.infra = testdata%>%data.frame(fits)%>%
-  dplyr::group_by(DistNearestInfra_sqrt, Month)%>% #only change here
-  dplyr::summarise(response=mean(fit),se.fit=mean(se.fit))%>%
-  dplyr::ungroup()
-write.csv(predicts.infra, paste(dpGAM, "predict.infra.csv", sep = "/")) #there is some BUG in dplyr - that this fixes
-predicts.infra<-read.csv(paste(dpGAM, "predict.infra.csv", sep = "/")) %>%
-  dplyr::mutate(Month = as.factor(Month)) %>%
-  glimpse()
-
-# Plot distnace to nearest boat ramp
-ggmod.gam.infra<- ggplot() +
-  ylab("Predicted number of fish depredated")+
-  xlab('Distance to nearest infrastructure (km, sqrt)')+
-  geom_ribbon(data = predicts.infra, aes(x = DistNearestInfra_sqrt,y = response, ymax= response + se.fit, ymin =
-                                            response - se.fit, xmin = 0, xmax = 6, group = Month,
-                                            fill = Month, colour = Month),alpha = 0.2, show.legend = T) +
-  geom_point(data = predicts.infra, aes(x = DistNearestInfra_sqrt, y = response, colour = Month),  alpha =
-               0.75, size=2, show.legend = F) +
-  geom_line(data=predicts.br,aes(x = DistNearestInfra_sqrt,y = response, group = Month, color = Month), alpha = 0.75, show.legend = F) +
-  # scale_fill_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  # scale_color_manual(labels = c("2015", "2016", "2020", "2021"), values = c("palevioletred1","lightskyblue", "lightsalmon","lightgreen"), name = "Year") +
-  theme_classic()
-ggmod.gam.infra
-
-DistNearestInfra_sqrt
-```
-
-```{r}
-write.csv(all.var.imp, paste(dpGAM, "all.var.imp.csv", sep= "/"))
-
-dat.var.imp <-read.csv(paste(dpGAM, "all.var.imp.csv", sep= "/"))%>% #from local copy
-  rename(resp.var=X)%>%
-  gather(key=predictor,value=importance,2:ncol(.))%>%
-  mutate(Model = "Depredation") %>% 
-  glimpse()
-
-dat.var.label<-dat.var.imp%>%
-  mutate(label=NA)%>%
-  mutate(label=ifelse(predictor=="facYear", "X",label))%>%
-  mutate(label=ifelse(predictor=="Depth_logxplusone", "X",label))%>%
-  mutate(label=ifelse(predictor=="DistNearestBRkm_logxplusone", "X",label))%>%
-  glimpse()
-
-legend_title <- "Importance"
-
-re <- colorRampPalette(c("#97c1a9","#cce2bc"))(200)
-
-# Plot gg.importance.scores
-gg.importance.scores <- ggplot(dat.var.label, aes(x=predictor, y=Model,fill=importance)) +
-  geom_tile(show.legend=T) +
-  scale_fill_gradientn(legend_title, colours=c("white", re), na.value = "grey98",
-                       limits = c(0, max(dat.var.label$importance))) +
-  scale_x_discrete(limits=c("nTimesLast24m","exDecMedianTime_sqrt","Depth_logxplusone","DistNearestBRkm_logxplusone","DecFishingHr_sqrt","MaxHook_sqrt", "BoatLength",
-                            "b_kdens_sqrt", "Month", "Side", "facYear", "Habitat",  "FishingType"),
-                   labels=c("Visits in last 24 months","Time of Day Fishing (sqrt)","Depth (m, log + 1 )","Distance to boat ramp (km, log + 1)","Hours fishing (sqrt)","Maximum hook depth (sqrt)", "Boat Length (m)",
-                            "Boat Kernal Density (sqrt)", "Month", "Side", "Year", "Habitat",  "Fishing Type"), guide = guide_axis(angle = 45)) +
-  xlab(NULL) +
-  ylab(NULL) +
-  theme_classic() +
-  geom_text(aes(label=label))
-  
-gg.importance.scores
-```
-
-#### without nDOP>30
-```{r}
-# Making all character vars factors
-dpdat2 <- dpdat2 %>%
-  mutate_if(is.character, as.factor) %>% 
-  mutate(facYear = as.factor(facYear))
-```
-
-# GAMMs
-## Assign 
-## Check for correlations
-```{r corrolations}
-# Need to put this package in the libs
-# ASk charlotte if you do this with just continuous variables of if you do factors to
-# If you put them all in then stick to teh format below 
-# Need to check for correlations above 0.95, any higher should be ruled out.
-# Figure out which one gets ruled out
-
-#  cor <-
-#   round(cor(dpdat[,c("numYear","nTimesLast24m","exDecMedianTime","Depth", "DistNearestBRkm", "DistNearestInfra", "UseLat","UseLong", "DecFishingHr","MaxHook","BoatLength",
-#                     "b_kdens", "b_5km")], use='complete.obs'), 2)
+# define top mod predictors
+# top.preds <- c("log.Depth", "log.Reef", "log.Lagoon", "sqrt.decDuration", "centroidLat")
 # 
-# round(cor(dpdat[,c("nDP", "nHooked")], use='complete.obs'), 2)
+# grids <- full_dat %>% distinct(gridID_alt, .keep_all = TRUE)
 # 
-# col2 <- colorRampPalette(c("#97c1a9","#cce2bc", "white", "#cce2cb","#81caca"))
+# # only works for spatial vars nmot people vars
+# for (i in 1:length(top.preds)) {
+#   plot <- ggplot(data = grids, aes_string(x = top.preds[i], y = "p_dem.fit")) +
+#     ylab("Predicted demersal catch") +
+#     geom_smooth(alpha = 0.75, size = 2, show.legend = FALSE) +
+#     theme_classic()
+#   
+#   plots[[i]] <- plot  # Add the plot to the list
+# }
 # 
-# png(height=1800, width=1800, "corplot.png", type = "cairo")
-# corrplot(cor, method = 'color', col = col2(10), tl.cex = 2, tl.col = "#595959", number.cex=1.5, addCoef.col="#595959", cl.cex = 2)
-# dev.off()
+# plots
+# 
+# people vars
+# t <- full_dat %>% distinct(PersonID, .keep_all = TRUE)
+# 
+# ggplot(data = t, aes(x = sqrt.decDuration, y = "p_dem.fit")) +
+#     ylab("Predicted demersal catch") +
+#     geom_smooth(alpha = 0.75, size = 2, show.legend = FALSE) +
+#     theme_classic()
 ```
 
-## Assign variables
-```{r assign cont}
-DPcont <- c("nTimesLast24m","exDecMedianTime",
-           "Depth","DistNearestBRkm", "DistNearestInfra", "DecFishingHr","MaxHook","BoatLength", "b_kdens", "b_5km") # No coords in this for transformations - will be added later 
+# Spatial plots
+```{r}
+full_dat %<>% mutate(ID = row_number()) 
+sp_dat %<>% mutate(ID = row_number()) 
 
-DPfac <- c("Month", "Side", "facYear", "Resident", "Habitat", "LunarPhase", "FishingType") # factors
+sp_dat %<>% left_join(full_dat[, c("ID","p_dem.fit", "p_dem.se.fit")], by = "ID")
+
+sp_grid <- sp_dat %>% distinct(gridID_alt, .keep_all = TRUE) %>% 
+  st_as_sf()
+
+ggplot() +
+  geom_sf(data = sp_grid$x, aes(fill = sp_grid$p_dem.fit), lwd = 0.05) +
+  scale_fill_gradient(name = "Demersal Catch") +
+  theme_classic()
+
+ggplot() +
+  geom_sf(data = sp_grid$x, aes(fill = sp_grid$p_dem.se.fit), lwd = 0.05) +
+  scale_fill_gradient(name = "Error: Demersal Catch") +
+  theme_classic()
 ```
-
-## Checking data
-### Removing Nas from data set
-```{r distrobution}
-
-dpdat3 <- dpdat2 %>% 
-  mutate(nTimesLast24m = ifelse(is.na(nTimesLast24m), 0, nTimesLast24m)) %>% 
-  filter(!(ID %in% c(502, 548, 565))) %>% 
-  mutate(MaxHook = ifelse(!is.na(Depth) & Depth > 0 & FishingType %in% "Demersal", Depth, MaxHook)) %>% 
-  drop_na(MaxHook) %>% 
-  mutate(BoatLength = ifelse(is.na(BoatLength), round(mean(BoatLength, na.rm = T)), BoatLength)) %>% 
-  mutate(DecFishingHr = ifelse(is.na(DecFishingHr), round(mean(DecFishingHr, na.rm = T)), DecFishingHr)) %>% 
-# turn to decimal subtract /add then turn back  into right format 
-  mutate(temp_Start = StartTime) %>% 
-  mutate(temp_Start = gsub("[:]", ".", temp_Start)) %>%
-  mutate(temp_Start = as.numeric(temp_Start)) %>% 
-  mutate(temp_Stop = StopTime) %>% 
-  mutate(temp_Stop = gsub("[:]", ".", temp_Stop)) %>% # will substitute all : with . within temp_start
-  mutate(temp_Stop = as.numeric(temp_Stop)) %>% 
-  mutate(temp_Start = ifelse(is.na(temp_Start), temp_Stop - DecFishingHr, temp_Start)) %>% 
-  mutate(temp_Stop = ifelse(is.na(temp_Stop), temp_Start + DecFishingHr, temp_Stop)) %>% 
-  rowwise() %>%
-  mutate(temp_Med = median(c(temp_Start, temp_Stop))) %>%
-  ungroup() %>% 
-  mutate(temp_Med = gsub("[.]", ":", temp_Med)) %>% 
-  mutate(Resident = as.factor(Resident)) %>% 
-  mutate(temp_Med = ifelse(str_length(temp_Med)==2, str_c(temp_Med, ":00"), temp_Med)) %>% # if string is 2 digits long it will ass ":00" to end of colum temp_Med
-  mutate(temp_Med = ifelse(str_length(temp_Med)==3, str_c("0", temp_Med, "0"), temp_Med)) %>% # if string is 3 digits long it will add a 0 to the strat and end of whats in temp_Med
-  mutate(temp_Med = ifelse(str_length(temp_Med)==4, str_c(temp_Med, "0"), temp_Med)) %>% 
-  mutate(exDecMedianTime = ifelse(!is.na(temp_Med), hhmm2dec(temp_Med), exDecMedianTime)) %>% 
-  mutate(exDecMedianTime = round(exDecMedianTime, digits = 2)) %>% # rounding to 2 digits after decimal 
-  mutate(exDecMedianTime = ifelse(is.na(exDecMedianTime), 12, exDecMedianTime)) %>% 
-  mutate(exDecMedianTime = as.numeric(exDecMedianTime)) %>% 
-  select(PersonID, nDP, nHooked, nTimesLast24m, exDecMedianTime,
-           Depth,DistNearestBRkm, DistNearestInfra, UseLat,
-           UseLong, DecFishingHr,MaxHook, BoatLength, b_kdens, b_5km, Month, Side, facYear, Resident, Habitat, LunarPhase, FishingType) %>% 
-  mutate(Depth = Depth*-1) %>% 
-  mutate(Depth = ifelse(PersonID %in% 190, 0, Depth)) %>% 
-  as.data.frame()
-
-# nTimesLast24m_sqrt - assuming in non entries are due to people not entering 0s if people haven't been to Exmouth before - hence filled with 0 
-# Depth_logxplusone - removed 3 rows 
-# MaxHook - if fishing was demersal made max hook equal to depth
-# BoatLength - filled in NAs with average boat length
-# DecFishingHr - filled nas with average fishing hours (4)
-# exDecMedianTime - if there was a start time i added the average fishing time (4) to get and end time and caculated the median from those times - and vice versa for when theres an end time and no start time. cases where there were neither a start or end time were filled with the average median time (12)
-```
-
-### Distribution
-Looking at data through various transformations to see which transformation provides the most normal distribution and is homoscedastic. 
-```{r distrobution}
-# need to run in console
-par(mfrow=c(3,4))
-for(i in DPcont) {
-  x <- dpdat2[,i]
-  x = as.numeric(unlist(x))
-  hist((x))
-  plot((x), main=paste(i))
-  hist(sqrt(x))
-  plot(sqrt(x))
-  hist(log(x+1))
-  plot(log(x+1))
-  hist((x))
-  plot((x), main=paste(i))
-  hist((x)^2)
-  plot((x)^2)
-  hist((x)^3)
-  plot((x)^3)
-}
-
-# nTimesLast24m: x
-# exDecMedianTime: log(x+1)
-# Depth: log(x+1)
-# DistNearestBR:log(x+1)
-# DistNearestInfra: sqrt
-# UseLat: x
-# UseLong:x
-# DecFishingHr:sqrt
-# MaxHook: sqrt
-# BoatLength: x
-# b_kdens: sqrt
-# b_5km: log(x+1)
-
-
-# Transform variables into dataset
-dpdat2$exDecMedianTime_sqrt <- sqrt(dpdat2$exDecMedianTime)
-dpdat2$Depth_logxplusone <- log(dpdat2$Depth +1)
-dpdat2$DistNearestBRkm_logxplusone <- log(dpdat2$DistNearestBRkm +1)
-dpdat2$DistNearestInfra_sqrt <- sqrt(dpdat2$DistNearestInfra)
-dpdat2$b_kdens_sqrt <- sqrt(dpdat2$b_kdens)
-dpdat2$b_5km_logxplusone <- log(dpdat2$b_5km +1)
-dpdat2$MaxHook_sqrt <- sqrt(dpdat2$MaxHook)
-dpdat2$DecFishingHr_sqrt <- sqrt(dpdat2$DecFishingHr)
-
-
-# Reset continuous predictor names and add coords
-DPcont <- c("nTimesLast24m","exDecMedianTime_sqrt",
-           "Depth_logxplusone","DistNearestBRkm_logxplusone", "DistNearestInfra_sqrt", "UseLat",
-           "UseLong", "DecFishingHr_sqrt","MaxHook_sqrt",
-           "BoatLength", "b_kdens_sqrt", "b_5km_logxplusone")
-
-which(is.na(dpdat2)) # make sure no nas
-which(is.nan(dpdat2$DPcont)) # make sure no nans
-
-dpdat2 %>% 
-  select(-UseLat) %>% 
-    filter(if_any(where(is.numeric), ~ .x <0)) # make sure there are no negatives
-
-# resenting to see if negatives in use lat are problem 
-DPcont <- c("nTimesLast24m","exDecMedianTime_sqrt",
-           "Depth_logxplusone","DistNearestBRkm_logxplusone","DecFishingHr_sqrt","MaxHook_sqrt",
-           "BoatLength", "b_kdens_sqrt")
-
-DPfac <- c("Month", "Side", "facYear", "Habitat",  "FishingType") # factors
-```
-
-### Zeros
-Aiming to have less than 80% zeros in resposne
-```{r zeros}
-unique.vars=unique(as.character(dpdat2$nDP))
-unique.vars.use=character()
-for(i in 1:length(unique.vars)){
-  temp.dat=dpdat2[which(dpdat2$nDP==unique.vars[i]),]
-  if(length(which(temp.dat$response==0))/nrow(temp.dat)<0.8){
-    unique.vars.use=c(unique.vars.use,unique.vars[i])}
-}
-unique.vars.use  
-
-# 60% zeros - all good
-
-
 

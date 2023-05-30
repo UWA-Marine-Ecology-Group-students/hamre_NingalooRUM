@@ -36,6 +36,8 @@
     
     dat <- read_csv("data/01_data/1.2_dat.csv")
     
+    bathy <- raster("./data/raster/NWSbathy.tif") # bathy
+    
     # mp <- st_read("./data/gpkg/pmmp_4326.gpkg") %>% 
     #   st_transform(crs = 4283)
     
@@ -118,9 +120,9 @@ tmp %<>% mutate(PartySize = ifelse(PartySize %in% c("6f", "Two couples 2 kids", 
     lm_ann_inc <- lm(ann_inc_21 ~ BoatLength, data = tmp)
     
 
-      ggplot(dat = tmp, aes(x = ann_inc_21, y = BoatLength)) +
-        geom_point() +
-        stat_smooth(method = "lm")
+      # ggplot(dat = tmp, aes(x = ann_inc_21, y = BoatLength)) +
+      #   geom_point() +
+      #   stat_smooth(method = "lm")
       
       dat$lm_ann_inc <- predict(lm_ann_inc, dat)
       
@@ -285,14 +287,19 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
 ### Land Present
 
 ```{r land present}
+
+coast %<>%  st_cast("POLYGON")
 coast$area <- as.numeric(set_units(st_area(coast), km^2)) # area of polygons in coast sf
 
 # Distance from mainland
 # Adjacent to land
 ## extracting islands from coast polygon
 islands <- coast %>%                                    
-  arrange(desc(area))  %>% 
+  arrange(desc(area)) %>% 
   slice(2:nrow(coast))
+
+ggplot() +
+  geom_sf(data = islands)
   
 ## create binary column indicating whether grid cell is adjacent to island
 grid %<>% 
@@ -317,7 +324,7 @@ ggplot() +
       rename(gridID_vis = gridID_alt, dat_geom = geometry) %>%
       #'[#NOTE: select vars for model] 
       #'Mandatory vars: TripID, PersonID, gridID_vis, Site, BoatLength  
-      dplyr::select(TripID, PersonID, gridID_vis, Site, BoatLength, cost, smpl_w, Postcode) %>% 
+      dplyr::select(TripID, PersonID, gridID_vis, Site, TripDate, MedianTime, BoatLength, cost, smpl_w, Postcode, cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, VOTT, ann_inc, KeptUndam, Dem, Dem_bin, Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, decDuration) %>% 
       distinct() %>%
       mutate(RampID = ifelse(Site %in% "ExmouthBR", 85, NA),
              RampID = ifelse(Site %in% "CoralBayBR", 72, RampID),
@@ -413,6 +420,61 @@ Distance from the boat ramp to the centroid of data points in each grid that lau
     #         legend.spacing.y = unit(0.75, "cm")) +
     #   facet_grid(.~fac_br_id) +
     #   ggtitle("Check distances look accurate")
+```
+
+### Envrionmental covariates
+```{r message=FALSE}
+# Depth
+tmp <- dat %>% dplyr::select(TripID, gridID_alt, asc_geom) %>% st_as_sf() 
+tmp <- mean_depth(bathy, tmp) # get average depth of grid
+tmp %<>% as.data.frame() 
+
+dat$Depth <- tmp$Depth
+dat$Depth <- abs(dat$Depth) # makes posotive
+
+# Swell
+dat %<>%
+    mutate(Long = st_coordinates(centroid)[,1]) %>%
+    mutate(Lat = st_coordinates(centroid)[,2])
+
+  #extracting swell
+   hsws <- get_hs_ws_day(dat$TripDate, dat$Long, dat$Lat) # getting hs and ws
+
+   # making a numeric hour column
+  dat$MedianHour <- as.numeric(gsub("\\:.*$", "", dat$MedianTime))
+
+  # catagorising time of day
+  dat$TimeOfDay <- with(dat,  ifelse(MedianHour >= 5 & MedianHour <= 10, "Morning",
+                            ifelse(MedianHour >= 11 & MedianHour <= 13, "Midday",
+                                   ifelse(MedianHour >= 14 & MedianHour <= 18, "Afternoon", NA))))
+
+  # appending swell and wind speed
+  hsws_df <- as.data.frame(hsws)
+
+  dat <- dat %>%
+    mutate(swell = ifelse(TimeOfDay %in% "Morning", hsws$hs_morning,
+                                ifelse(TimeOfDay %in% "Midday", hsws$hs_midday, hsws$hs_afternoon))) %>%
+    mutate(wind = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
+                                ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
+                                       hsws$wspeed_afternoon)))
+  
+# SST
+  coast_lambert <- coast %>% st_transform(crs = 3112) # need land lambert shp file loaded
+
+  sst_kelvins <- get_sst(Dates = dat$TripDate, Long = dat$Long, Lat = dat$Lat) # getting sst
+  
+  sst_celcius <- sst_kelvins - 273.15 # convert to celcius
+  
+  dat$sst <- sst_celcius
+
+  # tetsing new function
+  t <- dat %>% distinct(TripDate, .keep_all = TRUE) %>% filter(TripID %in% c(34, 36, 42))
+  
+  sst_kelvins <- get_sst(Dates = t$TripDate, Long = t$Long, Lat = t$Lat) # getting sst
+#   
+  
+  
+  
 ```
 
 ## Choice and travel cost ($0.54/km)
