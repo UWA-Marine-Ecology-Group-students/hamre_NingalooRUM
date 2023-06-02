@@ -471,10 +471,6 @@ dat %<>%
   t <- dat %>% distinct(TripDate, .keep_all = TRUE) %>% filter(TripID %in% c(34, 36, 42))
   
   sst_kelvins <- get_sst(Dates = t$TripDate, Long = t$Long, Lat = t$Lat) # getting sst
-#   
-  
-  
-  
 ```
 
 ## Choice and travel cost ($0.54/km)

@@ -27,8 +27,10 @@ source("./functions/brtFunc.R")
 source("./functions/theme.R")
 
 # data
-full_dat <- read.csv("./data/02_data/2.1_dat.csv")
-sp_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")
+# full_dat <- read.csv("./data/02_data/2.2_dat.csv")
+# sp_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")
+
+full_dat <- readRDS("./data/02_data/2.2_Site_4283.gpkg")
 ```
 
 # Data Prep
@@ -43,8 +45,14 @@ dat <- dat %>%
   mutate(demph = as.integer(Dem/decDuration)) %>% 
   mutate(dem_bin = ifelse(Dem > 0, 1, 0))
 
+dat %<>% 
+  mutate(centroidLat = st_coordinates(dat)[,2]) %>%
+  st_drop_geometry() %>% 
+  as.data.frame()
+  
+
 # Set the predictors for modeling
-pred.vars <- c("Dem", "Depth", "km_BR", "Pelagic", "Reef", "RReef", "Lagoon", "decDuration", "centroidLat") 
+pred.vars <- c("Dem", "depth", "l_km_br", "nl_km_br", "pelagic", "reef", "rreef", "lagoon", "decDuration", "centroidLat") 
 
 # Check there is no NAs
 summary(dat[,pred.vars])
@@ -54,9 +62,6 @@ correlate(dat[,pred.vars], use = "complete.obs") %>%
   gather(-term, key = "colname", value = "cor") %>% 
   dplyr::filter(abs(cor) > 0.5)
 
-# Make depth positive
-  dat$Depth <- abs(dat$Depth)
-  
 # Plot transformations - need to run in console
   par(mfrow = c(3,4))
 
@@ -87,15 +92,17 @@ correlate(dat[,pred.vars], use = "complete.obs") %>%
   }
   
   # Make transformations
-  dat$log.Depth <- log(dat$Depth + 1)
-  dat$log.km_BR <- log(dat$km_BR + 1)
-  dat$log.Reef <- log(dat$Reef + 1)
-  dat$log.RReef <- log(dat$RReef + 1)
-  dat$log.Lagoon <- log(dat$Lagoon + 1)
+  dat$log.dem <- log(dat$Dem + 1)
+  dat$log.depth <- log(dat$depth + 1)
+  dat$log.l_km_br <- log(dat$l_km_br + 1)
+  dat$log.nl_km_br <- log(dat$nl_km_br + 1)
+  dat$log.reef <- log(dat$reef + 1)
+  dat$log.rreef <- log(dat$rreef + 1)
+  dat$log.lagoon <- log(dat$lagoon + 1)
   dat$sqrt.decDuration <- sqrt(dat$decDuration)
   
   # update predictors
-pred.vars <- c("log.Depth","log.km_BR", "Pelagic", "log.Reef", "log.RReef", "log.Lagoon", "sqrt.decDuration", "centroidLat") 
+pred.vars <- c("log.depth","log.l_km_br", "log.nl_km_br","pelagic", "log.reef", "log.rreef", "log.lagoon", "sqrt.decDuration", "centroidLat") 
 ```
 
 # BRTs
@@ -235,6 +242,7 @@ Need less than 80% zeros in response
 # define response
 resp <- dat$Dem # 81% zeros
 # resp <- dat$demph # 86% zeros
+# resp <- dat$demph # 86% zeros
 
 zeros <- round(nrow(dat[which(resp == 0),])/nrow(dat)*100, 2)
 
@@ -260,7 +268,7 @@ top.all = list()
 # resp.vars = unique.vars.use
 
 # test model
-test_fit <- gam(Dem ~ s(log.Depth, k = 3, bs = 'cr') + s(PersonID, bs = 're'), family = 'poisson', data = dat)
+test_fit <- gam(Dem ~ s(log.depth, k = 3, bs = 'cr') + s(PersonID, bs = 're'), family = 'poisson', data = dat)
 
 # model selection
 model.set <- generate.model.set(use.dat = dat, 
@@ -318,12 +326,12 @@ all.var.imp %<>%
     theme_classic()
   
 # Make top model
-topmod <- gam(Dem ~ 
-                s(log.Depth, k = 3, bs = 'cr') + 
+topmod <- gam(log.dem ~ 
+                s(log.depth, k = 3, bs = 'cr') + 
                 s(sqrt.decDuration, k = 3, bs = 'cr') +
                 s(centroidLat, k = 3, bs = 'cr') + 
-                s(log.Reef, k = 3, bs = 'cr') +
-                s(log.Lagoon, k = 3, bs = 'cr') + 
+                s(log.reef, k = 3, bs = 'cr') +
+                s(log.lagoon, k = 3, bs = 'cr') + 
                 s(PersonID, bs = 're'), 
               family = 'poisson', 
               data = dat)
@@ -399,5 +407,11 @@ ggplot() +
   geom_sf(data = sp_grid$x, aes(fill = sp_grid$p_dem.se.fit), lwd = 0.05) +
   scale_fill_gradient(name = "Error: Demersal Catch") +
   theme_classic()
+
+ggplot() +
+  geom_sf(data = sp_grid$x)
+
+ggplot() +
+  geom_histogram(data = full_dat, aes(x = p_dem.fit))
 ```
 

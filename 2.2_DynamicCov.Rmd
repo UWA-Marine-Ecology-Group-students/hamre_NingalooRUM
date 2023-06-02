@@ -1,4 +1,6 @@
 ```{r setup}
+rm(list = ls())
+
 # knitr options
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center', fig.width = 10, fig.height = 7) 
 
@@ -32,26 +34,48 @@ coast <- st_read("./data/gpkg/coast.gpkg") %>%  st_transform(4283)
 # Data prep
 ```{r data prep}
 # # making use data spatial 
+# dat %<>%
+#   filter(!is.na(UseLat), !is.na(UseLong)) %>%
+#   st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
+
 dat %<>%
-  filter(!is.na(UseLat), !is.na(UseLong)) %>%
-  st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
+  filter(!is.na(centroidLat), !is.na(centroidLong)) %>%
+  st_as_sf(coords = c("centroidLong", "centroidLat"), crs = 4283)
 
-sm_dat <- dat %>%  
-  mutate(trp_grid = str)
+# sm_dat <- dat %>%  
+#   mutate(trp_grid = str)
 ```
-
 
 # Enviromental variables
 ## SST
 ```{r}
+# Make small data to extract sst - test if this makes it quicker
+# tmp <- dat %>% 
+#   dplyr::select(gridid_alt, TripDate, centroidLong, centroidLat) %>%
+#   distinct_at(vars("gridid_alt", "TripDate"), .keep_all = TRUE)
+
 coast_lambert <- coast %>%
   st_transform(crs = 3112) # need land lambert shp file loaded
 
 sst_kelvins <- get_sst(dat$TripDate, dat$centroidLong, dat$centroidLat) # getting sst
 
-sst_celcius <- sst_kelvins - 273.15 # convert to celcius
+sst_celcius <- round(sst_kelvins - 273.15, 2) # convert to celcius
 
 dat$sst <- sst_celcius
+
+# tmp <- dat %>%  filter(is.na(sst))
+# 
+# t <- tmp %>% distinct(gridid_alt, .keep_all = TRUE)
+# 
+# t %<>%
+#   filter(!is.na(centroidLat), !is.na(centroidLong)) %>%
+#   st_as_sf(coords = c("centroidLong", "centroidLat"), crs = 4283)
+# 
+# ggplot() +
+#   geom_sf(data = coast) +
+#   geom_sf(data = t, colour = 'red')
+
+# Missing data is centroid that are on land - dont think ill need it
 ```
 
 ## Swell height and wind speed
@@ -77,14 +101,6 @@ Not very high res - not useful for area whith lots of islands like Esperance.
 #   mutate(WindSpeed = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
 #                               ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
 #                                      hsws$wspeed_afternoon)))
-```
-
-# Plotting corroloation matrix
-```{r corr}
-# num_dat <- dplyr::select_if(dat, is.numeric) # subset to numericv variables
-# cor <- round(cor(num_dat, use = "complete.obs"), 2) # get correlations
-# corrplot <- corrplot(cor) # plot correlations
-# cor
 ```
 
 # Save output

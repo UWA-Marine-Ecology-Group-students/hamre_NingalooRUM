@@ -1,4 +1,7 @@
+# Set up
 ```{r setup}
+    rm(list = ls())
+
     # knitr options
     knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, fig.align = 'center',
                           fig.width = 10, fig.height = 7) 
@@ -15,6 +18,7 @@
     library(googledrive)
     library(units)
     library(nngeo)
+    library(sfnetworks)
     # library(windfetch)
     
     # functions
@@ -24,7 +28,7 @@
     ## gpkg - ESPG 4283 (GDA94)
     ## raster - ESPG 4326 (WGS84)
 
-    BR <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% st_transform(crs = 4283)# from BRtrips.R
+    BR <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% st_transform(crs = 4283) # from BRtrips.R
     
     coast <- st_read("./data/gpkg/coast.gpkg") %>%  st_transform(4283)
     
@@ -36,7 +40,8 @@
     
      habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
       st_transform(crs = 4283) %>% 
-      st_make_valid()
+      st_make_valid() %>% 
+      mutate(habitat = tolower(habitat))
     
     bathy <- raster("./data/raster/NWSbathy.tif") # bathy
     
@@ -88,10 +93,11 @@
   grid <- rbind(grid, ntz_grid)
   
   grid %<>% 
-    mutate(gridID = row_number())
+    mutate(gridid = row_number()) %>% 
+    rename(grid_geom = x)
 
    ggplot() +
-    geom_sf(data = grid, aes(fill = area), lwd = 0.05)
+    geom_sf(data = grid, aes(fill = area), lwd = 0.05) + theme_classic()
 ```
 
 # Attributes
@@ -99,18 +105,36 @@
 Calculates the average depth within each grid cell (site). This does work is after grid manipulation.
 ```{r depth}
     grid <- mean_depth(bathy, grid) # get average depth of grid
+    grid$depth <- abs(grid$depth)
     
     ggplot() +
-      geom_sf(data = grid, aes(fill = Depth), lwd = 0.05)
+      geom_sf(data = grid, aes(fill = depth), lwd = 0.05) + 
+      scale_fill_continuous(trans = 'reverse') +
+      theme_classic()
+```
+
+## Rugousity
+```{r}
+rug <- terra::terrain(bathy, v = c("roughness"))
+
+rugousity <- raster::extract(rug, grid, na.rm = TRUE, fun = max)
+
+grid$rug <- as.numeric(rugousity)
+
+# check
+plot(rug) 
+
+ggplot() +
+  geom_sf(data = grid, aes(fill = rug), lwd = 0.05) + theme_classic()
 ```
 
 ## Centroid
 ```{r}
-    centroid <- st_centroid_within_poly(grid) # gets centroid of every grid cell
-    grid$centroid <- centroid$x # bind centroid to grid sf 
+    centroid <- st_centroid_within_poly(grid$grid_geom) # gets centroid of every grid cell
+    grid$centroid <- centroid # bind centroid to grid sf 
     
     ggplot() +
-      geom_sf(data = grid$centroid, size = 0.05)
+      geom_sf(data = grid$centroid, size = 0.05) + theme_classic()
 ```
 
 ## Habitat
@@ -127,7 +151,7 @@ Calculates the area (km2) of each habitat type in each individual grid cell (sit
   habs <- unique(habitat$habitat)
   
   hab_grid <- hab %>%
-    group_by(gridID) %>%
+    group_by(gridid) %>%
     summarise_at(habs, .funs = sum) %>%
     ungroup() %>%
     st_drop_geometry()
@@ -144,12 +168,13 @@ Calculates the area (km2) of each habitat type in each individual grid cell (sit
 
   # all are at the very edges and are pelagic
     
-  grid %<>% left_join(hab_grid, by = "gridID")
+  grid %<>% left_join(hab_grid, by = "gridid")
   
   grid <- grid %>% 
-    mutate(Pelagic = ifelse(is.na(Pelagic), area, Pelagic)) %>% 
-    mutate_at(c("Lagoon", "Reef", "RReef"), ~replace_na(.,0))
+    mutate(pelagic = ifelse(is.na(pelagic), area, pelagic)) %>% 
+    mutate_at(c("lagoon", "reef", "rreef"), ~replace_na(.,0))
 ```
+
 ## Land
 Distance to mainland: Calculates the linear distance from the centroid of every grid cell (site) to the nearest point on mainland.
 Adjacent to land: Creates binary list indicating whether there is an island are adjacent to grid cell (site).
@@ -176,25 +201,51 @@ islands <- coast %>%
 
 ## create binary column indicating whether grid cell is adjacent to island
 grid %<>%
-  mutate(isl_adj = ifelse(as.list(st_intersects(grid, islands)) %in% "integer(0)", 0, 1))
+  mutate(isl_adj = ifelse(as.list(st_intersects(grid, islands)) %in% "integer(0)", 0, 1)) %>% 
+  mutate(isl_adj = as.factor(isl_adj))
 
 # checkpoint
 ggplot() +
-  geom_sf(data = grid, aes(fill = km_mainland))
+  geom_sf(data = grid, aes(fill = km_mainland), lwd = 0.05) + theme_classic()
 
 ggplot() +
-  geom_sf(data = grid, aes(fill = isl_adj))
+  geom_sf(data = grid, aes(fill = isl_adj), lwd = 0.05) + theme_classic()
 ```
+
 ## Dist to BR
-Calculates the linear distance from each boat ramp to every centroid - data frame rows should multiple by number of boat ramps.
+Calculates the linear and non-linear distance from each boat ramp to every centroid.
 
 ```{r distance to BR}
-dist <- as.data.frame(set_units(st_distance(grid$centroid, BR), km)) 
-names(dist) <- unique(BR$RampID)
-gridID <- grid$gridID
-dist$gridID <- gridID
-dist <- dist %>% gather("RampID", "km_BR", 1:length(dist) - 1) 
-grid %<>% left_join(dist, by = "gridID") # join to input data
+  # create distanec matrix
+  dist <- dist(grid$centroid, BR$geometry, BR$RampID, grid$gridid) # create distance dataframe
+  dist %<>% left_join(BR[, c("RampID", "br_geom")]) # append ramp geom
+  
+  # append distance to grid
+  grid %<>% left_join(dist, by = "gridid") # join to input data
+  nrow(grid) == n_distinct(grid$gridid)*nrow(BR) # check dataset is the correct size
+  
+
+    ggplot(grid) +
+      geom_sf(aes(geometry = grid_geom, fill = nl_km_br), lwd = 0.25) +
+      geom_sf(aes(geometry = br_geom, colour = as.factor(RampID)), size = 3) +
+      theme_classic() +
+      scale_fill_distiller(palette = "Blues") +
+      labs(fill = "Non-linear km from BR", colour = "") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+            legend.spacing.y = unit(0.75, "cm")) +
+      facet_grid(.~RampID) +
+      ggtitle("Check distances look accurate")
+    
+    ggplot(grid) +
+      geom_sf(aes(geometry = grid_geom, fill = l_km_br), lwd = 0.25) +
+      geom_sf(aes(geometry = br_geom, colour = as.factor(RampID)), size = 3) +
+      theme_classic() +
+      scale_fill_distiller(palette = "Blues") +
+      labs(fill = "Linear km from BR", colour = "") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+            legend.spacing.y = unit(0.75, "cm")) +
+      facet_grid(.~RampID) +
+      ggtitle("Check distances look accurate")
 ```
 
 ## Artificial infrastructure present
@@ -233,7 +284,8 @@ Creates binary list indicating whether there is artificial infrastructure presen
 # ggplot() +
 #   geom_sf(data = waterGrid, aes(fill = shelter), lwd = 0.05)
 ```
-## Save output
+
+# Save output
 ```{r save}
 saveRDS(grid, "./data/gpkg/2.0_Sites_4283.gpkg")
 ```

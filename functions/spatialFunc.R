@@ -20,7 +20,7 @@ require(nngeo)
 
 devtools::source_url("https://github.com/aodn/imos-user-code-library/blob/master/R/commons/NetCDF/ncParse.R?raw=TRUE")
 
-#get_sst
+### get_sst ####
 
 #get_sst is a function to extract the sst given a series of Dates and points (Latitudes and Longitude). The function
 #returns a single column of sst corresponding to the input Dates and points.
@@ -45,6 +45,9 @@ get_sst<- function(Dates, Long, Lat){
     sf::st_as_sf(coords = c("Long", "Lat"), crs = 4283) %>% #only extract for points on this day
     st_transform(3112) %>%
     mutate(ID = row_number())
+  
+  NDATES <- n_distinct(Dates)
+  print(paste0("Getting sst for ", NDATES, " dates."))
   
   #ggplot() +  geom_sf(data = coast_lambert) + geom_sf(data = Points) 
   
@@ -94,7 +97,7 @@ get_sst<- function(Dates, Long, Lat){
   Points$sst
 }
 
-#get_sst.DOWNLOAD
+#### get_sst.DOWNLOAD ####
 
 #get_sst is a function to extract the sst given a series of Dates and points (Latitudes and Longitude). The function
 #returns a single column of sst corresponding to the input Dates and points.
@@ -169,20 +172,21 @@ get_sst.DOWNLOAD<- function(Dates, Long, Lat, file){
   Points$sst
 }
 
+#### get_sst ####
+
+#get_sst is a function to extract the sst given a series of Dates and points (Latitudes and Longitude). The function
+#returns a single column of sst corresponding to the input Dates and points.
+#sst is extracted from the AODN website and corresponds to a monthly average. This was used to minimise holes
+#and for better reach into coastal areas. SST resolution is 0.02deg. The extraction function searches for data within 
+#100 and then 10000 and then 100000m from the point. Failing that it returns a warning
+#more details on source data at: https://catalogue-imos.aodn.org.au/geonetwork/srv/api/records/023ae12a-8c0c-4abc-997a-7884f9fec9cd
+
+#ARGUMENTS
+#Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
+#Latitude: is the latitude of the point files in GDA94
+#Longitude is the longitude of the pont files in GDA94
+
 get_sst_OneMonthAverage<- function(Dates, Long, Lat){
-  #get_sst
-  
-  #get_sst is a function to extract the sst given a series of Dates and points (Latitudes and Longitude). The function
-  #returns a single column of sst corresponding to the input Dates and points.
-  #sst is extracted from the AODN website and corresponds to a monthly average. This was used to minimise holes
-  #and for better reach into coastal areas. SST resolution is 0.02deg. The extraction function searches for data within 
-  #100 and then 10000 and then 100000m from the point. Failing that it returns a warning
-  #more details on source data at: https://catalogue-imos.aodn.org.au/geonetwork/srv/api/records/023ae12a-8c0c-4abc-997a-7884f9fec9cd
-  
-  #ARGUMENTS
-  #Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
-  #Latitude: is the latitude of the point files in GDA94
-  #Longitude is the longitude of the pont files in GDA94
   
   Points<-tibble(Dates = Dates, Long = Long,  Lat = Lat) %>%  
     sf::st_as_sf(coords = c("Long", "Lat"), crs = 4283) %>% #only extract for points on this day
@@ -272,21 +276,21 @@ get_sst_OneMonthAverage<- function(Dates, Long, Lat){
   out
 }
 
+#### get_hs_ws_day ####
+
+#get_hs_ws_day is a function to extracts monthly mean significant wave heights and wind speeds given a series of Dates and points 
+#(Latitudes and Longitude). Data is extracted for morning: 8-10, midday: 11-1 and afternoon: 2-4
+#The function returns a a list of 2 lists (one for hs and one for ws) corresponding to the input Dates and points.
+#hs and ws is extracted from the CSIRO https://data.csiro.au/collections/#collection/CIcsiro:39819. 
+#The extraction function searches for data within 
+#100 and then 10000 and then 100000m from the point. Failing that it returns a warning
+
+#ARGUMENTS
+#Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
+#Latitude: is the latitude of the point files in GDA94
+#Longitude is the longitude of the pont files in GDA94
+
 get_hs_ws_day<- function(Dates, Long, Lat){
-  
-  #get_hs_ws_day
-  
-  #get_hs_ws_day is a function to extracts monthly mean significant wave heights and wind speeds given a series of Dates and points 
-  #(Latitudes and Longitude). Data is extracted for morning: 8-10, midday: 11-1 and afternoon: 2-4
-  #The function returns a a list of 2 lists (one for hs and one for ws) corresponding to the input Dates and points.
-  #hs and ws is extracted from the CSIRO https://data.csiro.au/collections/#collection/CIcsiro:39819. 
-  #The extraction function searches for data within 
-  #100 and then 10000 and then 100000m from the point. Failing that it returns a warning
-  
-  #ARGUMENTS
-  #Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
-  #Latitude: is the latitude of the point files in GDA94
-  #Longitude is the longitude of the pont files in GDA94
   
   Points<-tibble(Dates = Dates, Long = Long,  Lat = Lat) %>%  
     sf::st_as_sf(coords = c("Long", "Lat"), crs = 4283) %>%
@@ -383,22 +387,21 @@ get_hs_ws_day<- function(Dates, Long, Lat){
   out
 }
 
+#### get_hs_ws ####
 
+#get_hs_ws is a function to extracts monthly mean significant wave heights and wind speeds given a series of Dates and points 
+#(Latitudes and Longitude). 
+#The function returns a a list of 2 lists (one for hs and one for ws) corresponding to the input Dates and points.
+#hs and ws is extracted from the CSIRO https://data.csiro.au/collections/#collection/CIcsiro:39819. 
+#The extraction function searches for data within 
+#100 and then 10000 and then 100000m from the point. Failing that it returns a warning
+
+#ARGUMENTS
+#Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
+#Latitude: is the latitude of the point files in GDA94
+#Longitude is the longitude of the pont files in GDA94
 
 get_hs_ws<- function(Dates, Long, Lat){
-  #get_hs_ws
-  
-  #get_hs_ws is a function to extracts monthly mean significant wave heights and wind speeds given a series of Dates and points 
-  #(Latitudes and Longitude). 
-  #The function returns a a list of 2 lists (one for hs and one for ws) corresponding to the input Dates and points.
-  #hs and ws is extracted from the CSIRO https://data.csiro.au/collections/#collection/CIcsiro:39819. 
-  #The extraction function searches for data within 
-  #100 and then 10000 and then 100000m from the point. Failing that it returns a warning
-  
-  #ARGUMENTS
-  #Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
-  #Latitude: is the latitude of the point files in GDA94
-  #Longitude is the longitude of the pont files in GDA94
   
   Points<-tibble(Dates = Dates, Long = Long,  Lat = Lat) %>%  
     sf::st_as_sf(coords = c("Long", "Lat"), crs = 4283) %>%
@@ -491,23 +494,23 @@ get_hs_ws<- function(Dates, Long, Lat){
   out
 }
 
+#### get_hs_wsDOWNLOAD ####
 
+# This the version where you have already downloaded the file and you are just extractive data. Use the https server download and set working directory to the folder
+#get_hs_ws is a function to extracts monthly mean significant wave heights and wind speeds given a series of Dates and points 
+#(Latitudes and Longitude). 
+#The function returns a a list of 2 lists (one for hs and one for ws) corresponding to the input Dates and points.
+#hs and ws is extracted from the CSIRO https://data.csiro.au/collections/#collection/CIcsiro:39819. 
+#The extraction function searches for data within 
+#100 and then 10000 and then 100000m from the point. Failing that it returns a warning
+
+#ARGUMENTS
+#Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
+#Latitude: is the latitude of the point files in GDA94
+#Longitude is the longitude of the pont files in GDA94
 
 get_hs_wsDOWNLOAD<- function(Dates, Long, Lat){
-  #get_hs_wsDOWNLOAD  - is the version where you have already downloaded the file and you are just extractive data. Use the https server download and set working directory to the folder
-  
-  #get_hs_ws is a function to extracts monthly mean significant wave heights and wind speeds given a series of Dates and points 
-  #(Latitudes and Longitude). 
-  #The function returns a a list of 2 lists (one for hs and one for ws) corresponding to the input Dates and points.
-  #hs and ws is extracted from the CSIRO https://data.csiro.au/collections/#collection/CIcsiro:39819. 
-  #The extraction function searches for data within 
-  #100 and then 10000 and then 100000m from the point. Failing that it returns a warning
-  
-  #ARGUMENTS
-  #Dates: is a data vector (created using as.Date) with format YYYY-MM-DD
-  #Latitude: is the latitude of the point files in GDA94
-  #Longitude is the longitude of the pont files in GDA94
-  
+
   Points<-tibble(Dates = Dates, Long = Long,  Lat = Lat) %>%  
     sf::st_as_sf(coords = c("Long", "Lat"), crs = 4283) %>%
     st_transform(4326) %>% 
@@ -602,7 +605,7 @@ get_hs_wsDOWNLOAD<- function(Dates, Long, Lat){
   out
 }
 
-#extract_mean_from_raster
+#### extract_mean_from_raster ####
 
 #extract_mean_from_raster is a function to extract the average value of a raster over each polygon in a shapefile. It is 
 #essentially a wrapper for the extract function in the raster package. The function needs to be provided with an sf 
@@ -621,7 +624,7 @@ extract_mean_from_raster<-function(raster, polygon){
   polygon
 }
 
-#mean_depth
+#### mean_depth ####
 
 # mean_depth is an extension of Matts extract_mean_from_raster function. This function calculates the average depth in a polygon. 
 # The extension on Matts means you do not have to reproject any of your data before hand. The function needs a bathymetry ratser 
@@ -638,11 +641,11 @@ mean_depth<-function(bathy, polygon){
   poly_to_bathy_crs <- st_transform(polygon, bathy_crs) # re-project polygon to match raster
   r.vals <- raster::extract(bathy, poly_to_bathy_crs) #extract values of raster
   r.mean <- unlist(lapply(r.vals, FUN=mean)) #take mean for each polygon
-  poly_to_bathy_crs$Depth <- r.mean #merge mean back in to polygon
+  poly_to_bathy_crs$depth <- r.mean #merge mean back in to polygon
   polygon <- st_transform(poly_to_bathy_crs, poly_crs)
 }
 
-# habitat_area
+#### habitat_area ####
 # habitat_area is a function which calculates the area (km2) of every habitat present within individual grid cells. 
 # To run function you need a 
 #   - sf of habitat with a habitat column and geometry column
@@ -676,7 +679,7 @@ habitat_area <- function(sf_habitat, col_habitat, sf_grid, id_grid){ #id_grid is
   sf_grid %>% left_join(habitat_grid, by = ID)
 }
 
-# st_centroid_within_poly
+#### st_centroid_within_poly ####
 # st_centroid_within_poly returns the true centroid if inside polygon otherwise makes a centroid inside the polygon
 # 
 # ARGUMENTS
@@ -696,7 +699,7 @@ st_centroid_within_poly <- function (poly) {
   return(centroid_in_poly)
 }
 
-# dist_br
+#### dist_br ####
 # dist_br is a function that calculates the distance from each boat ramp to the centroid of every site 
 # (grid cell). For this function you need to have two sf objects 
 #   - Grid of sites, sites must have a unique ID and geom with the centroid of each site
@@ -719,7 +722,7 @@ dist_br <- function(sf_grid, id_grid, poly_centroid, sf_br, br_names){
 }
 
 
-# dist_mainland
+#### dist_mainland ####
 # dist_mainland is a function that calculates the distance from the centroid of every grid cell (site) to the
 # nearest point of the mainland. For this function you need to have two sf objects 
 #   - sf of containing grid of sites, each site must have a unique ID and a geom point with site centroid (st_centroid_within_poly)
@@ -743,4 +746,147 @@ dist_mainland <- function(poly_centroid, mainland){
   nearest <- nearest$dist # stores only the distance
   dist <- (unlist(nearest))/1000 # unlists and converts to km
   df <- expand.grid(km_mainland = dist) # turning into df and adding ID
+}
+
+
+#### dist ####
+# This function  creates a dataset measuring the linear and non-linear distance from each boat ramp to 
+# each cell centroid. The non-linear distance will travelling only via centroids and therefore will skip # the land - assuming your grid doesn't include land. 
+
+# ARGUMENTS
+# centroid_geom: the geometry column of the grid centroids
+# br_geom: the geometry column for the boat ramps
+# RampID: the ID column in your BR dataset
+# gridID: ID column in grid data set
+
+
+dist <- function(centroid_geom, br_geom, RampID, gridid) {
+  
+  # Calculate non-linear distance 
+  
+  # extract coordinates
+  br <- as.data.frame(st_coordinates(br_geom))
+  points <- as.data.frame(st_coordinates(centroid_geom)) 
+  
+  NGRIDS <- nrow(points) # extract number of grids
+  ids <- c(RampID, gridid) # make ids
+  
+  points <- rbind(br, points) %>% mutate(ID = row_number()) # first obs are the boat ramps
+  
+  NCELL <- nrow(points) # Set the number of cells in the model
+  
+  ## Convert the points in the centroids of the polygon to a spatial points file
+  points$ID <- as.integer(points$ID)
+  points_sf <- st_as_sf(points, coords = c("X", "Y"))
+  points_sp <- st_cast(st_geometry(points_sf), "POINT")
+  
+  ## Figure out which six points are the closest - won't all have six close ones but can start from there
+  dist.mat <- st_distance(points_sp) # Great Circle distance since in lat/long
+  
+  ## Get the IDS for the cells that are neighbours
+  n.closest <- 6 # Decide how many neighbours you want to use
+  
+  neighbours <- as.data.frame(array(0, dim = c(NCELL, n.closest)))
+  
+  for (i in 1:n.closest) {
+    neighbours[,i] <- apply(dist.mat, 1, function(x) { order(x, decreasing = F)[i + 1] })
+  }
+  
+  ## Give the neighbouring points geometry based on the original set of points
+  point.list <- list()
+  
+  for (i in 1:n.closest) {
+    
+    temp1 <- as.data.frame(neighbours[,i])
+    
+    temp2 <- temp1 %>%
+      rename(ID = "neighbours[, i]") %>% 
+      inner_join(., points, by = "ID") %>% 
+      st_as_sf(., coords = c("X", "Y")) 
+    
+    temp3 <- st_cast(st_geometry(temp2), "POINT")
+    
+    point.list[[i]] <- temp3
+    
+  }
+  
+  # CONNECT THE POINTS TO THEIR NEIGHBOURS TO FORM A NETWORK ####
+  n <- nrow(points)
+  
+  ## Form linestrings and then multilinestrings
+  multilinestrings <- list()
+  
+  for (i in 1:n.closest) {
+    
+    linestring <- point.list[[i]]
+    
+    temp <- lapply(X = 1:n, FUN = function(x) {
+      pair <- st_combine(c(points_sp[x], linestring[x]))
+      line <- st_cast(pair, "LINESTRING")
+      return(line)
+    })
+    
+    temp2 <- st_multilinestring(do.call("rbind", temp))
+    
+    multilinestrings[[i]] <- temp2
+    
+  }
+  
+  connected <- st_combine(c(multilinestrings[[1]], multilinestrings[[2]], multilinestrings[[3]],   multilinestrings[[4]], multilinestrings[[5]], multilinestrings[[6]]))
+  connected <- st_cast(connected, "LINESTRING") # Needs to be a line string rather than multiline for the next step
+  
+  # setwd(working.dir)
+  # st_write(connected, paste0(model.name, sep="_", "network.shapefile.shp"))
+  
+  # SET UP THE SF NETWORK AND CREATE FULL DISTANCE MATRIX ####
+  network <- as_sfnetwork(connected, directed = FALSE) %>%
+    activate("edges") %>%
+    mutate(weight = edge_length())
+  
+  ## Calculate the distances from each point to every other point on the network
+  net <- activate(network, "nodes")
+  network_matrix <- st_network_cost(net, from = points_sf, to = points_sf)
+  network_matrix <- network_matrix * 111 # Multiple by 111 to get from degrees to kms
+  dim(network_matrix) # Check that the dimensions match up to how many points you think you should have in the network
+  
+  ## Checks to make sure it's done what you want
+  # Checking that short distances between points are the same e.g. 1 -> 2
+  # test <- st_distance(points_sf[1,2], points_sf[2,2])
+  # test * 111 # 8.2km 
+  # network_matrix[1,2] # 8.2km km 
+  # 
+  # # Checking that points that cross the land are not the same - should be longer in our network matrix
+  # # Find two points that are either side of the land and should have a long distances between them
+  # plot(points_sf, col = ifelse(points_sf$ID == 1300 | points_sf$ID == 600, "red", "black")) # These are on opposite sides of the cape
+  # 
+  # test <- st_distance(points_sf[1300,2], points_sf[600,2])
+  # test*111 # 115km
+  # 
+  # test_matrix <- st_network_cost(net, from = points_sf[1300, 2], to = points_sf[600,2])
+  # test_matrix*111 # 131km
+  
+  colnames(network_matrix) <- ids # change names to ids
+  
+  nbr <- nrow(br) + 1 # set gather limit
+  
+  # remove boat ramps, append gridIDs and gather data frame
+  network_matrix %<>% 
+    as.data.frame() %>% 
+    dplyr::select(1:4) %>% 
+    slice(nbr:nrow(.)) %>% 
+    mutate(gridid = gridid) %>% 
+    gather("RampID", "nl_km_br", 1:length(.) - 1) %>% 
+    mutate(nl_km_br = round(nl_km_br, 2))
+  
+  # nrow(dist) == nrow(grid)
+  
+  # Calculate linear distance
+  l_dist <- as.data.frame(set_units(st_distance(centroid_geom, br_geom), km))
+  l_dist %<>% gather("RampID", "l_km_br", 1:length(.)) %>% 
+    mutate(l_km_br = round(as.numeric(l_km_br), 2))
+  
+  # append linear distance
+  network_matrix$l_km_br <- l_dist$l_km_br
+  
+  return(network_matrix)
 }
