@@ -30,7 +30,8 @@ source("./functions/theme.R")
 # full_dat <- read.csv("./data/02_data/2.2_dat.csv")
 # sp_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")
 
-full_dat <- readRDS("./data/02_data/2.2_Site_4283.gpkg")
+# full_dat <- readRDS("./data/02_data/2.2_Site_4283.gpkg")
+full_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg") %>% mutate(rug = as.numeric(rug))
 ```
 
 # Data Prep
@@ -45,14 +46,14 @@ dat <- dat %>%
   mutate(demph = as.integer(Dem/decDuration)) %>% 
   mutate(dem_bin = ifelse(Dem > 0, 1, 0))
 
-dat %<>% 
-  mutate(centroidLat = st_coordinates(dat)[,2]) %>%
-  st_drop_geometry() %>% 
-  as.data.frame()
+# dat %<>% 
+#   mutate(centroidLat = st_coordinates(dat)[,2]) %>%
+#   st_drop_geometry() %>% 
+#   as.data.frame()
   
 
 # Set the predictors for modeling
-pred.vars <- c("Dem", "depth", "l_km_br", "nl_km_br", "pelagic", "reef", "rreef", "lagoon", "decDuration", "centroidLat") 
+pred.vars <- c("Dem", "depth", "l_km_br", "nl_km_br", "pelagic", "reef", "rreef", "lagoon", "decDuration", "rug", "centroidLat") 
 
 # Check there is no NAs
 summary(dat[,pred.vars])
@@ -92,17 +93,18 @@ correlate(dat[,pred.vars], use = "complete.obs") %>%
   }
   
   # Make transformations
-  dat$log.dem <- log(dat$Dem + 1)
-  dat$log.depth <- log(dat$depth + 1)
-  dat$log.l_km_br <- log(dat$l_km_br + 1)
-  dat$log.nl_km_br <- log(dat$nl_km_br + 1)
-  dat$log.reef <- log(dat$reef + 1)
-  dat$log.rreef <- log(dat$rreef + 1)
-  dat$log.lagoon <- log(dat$lagoon + 1)
-  dat$sqrt.decDuration <- sqrt(dat$decDuration)
+  dat$log_dem <- log(dat$Dem + 1)
+  dat$log_depth <- log(dat$depth + 1)
+  dat$log_lkm_br <- log(dat$l_km_br + 1)
+  dat$log_nlkm_br <- log(dat$nl_km_br + 1)
+  dat$log_reef <- log(dat$reef + 1)
+  dat$log_rreef <- log(dat$rreef + 1)
+  dat$log_lagoon <- log(dat$lagoon + 1)
+  dat$sqrt_decDuration <- sqrt(dat$decDuration)
+  dat$sqrt_rug <- sqrt(dat$rug)
   
   # update predictors
-pred.vars <- c("log.depth","log.l_km_br", "log.nl_km_br","pelagic", "log.reef", "log.rreef", "log.lagoon", "sqrt.decDuration", "centroidLat") 
+pred.vars <- c("log_depth","log_nlkm_br","pelagic", "log_reef", "log_rreef", "log_lagoon", "sqrt_decDuration", "sqrt_rug", "centroidLat") 
 ```
 
 # BRTs
@@ -242,7 +244,7 @@ Need less than 80% zeros in response
 # define response
 resp <- dat$Dem # 81% zeros
 # resp <- dat$demph # 86% zeros
-# resp <- dat$demph # 86% zeros
+# resp <- dat$dem_bin # 86% zeros
 
 zeros <- round(nrow(dat[which(resp == 0),])/nrow(dat)*100, 2)
 
@@ -268,7 +270,7 @@ top.all = list()
 # resp.vars = unique.vars.use
 
 # test model
-test_fit <- gam(Dem ~ s(log.depth, k = 3, bs = 'cr') + s(PersonID, bs = 're'), family = 'poisson', data = dat)
+test_fit <- gam(Dem ~ s(log_depth, k = 3, bs = 'cr') + s(PersonID, bs = 're'), family = tw(), data = dat)
 
 # model selection
 model.set <- generate.model.set(use.dat = dat, 
@@ -299,7 +301,7 @@ model.set <- generate.model.set(use.dat = dat,
     if (best.model.name != "null") {
       # par(mfrow = c(3, 1), mar = c(9, 4, 3, 1))
       best.model = out.list$success.models[[best.model.name]]
-      plot <- plot(best.model,all.terms = T, pages = 1, residuals = T, pch = 16)
+      plot <- plot(best.model,all.terms = T, pages = 1, residuals = T, pch = 16, shade = TRUE)
       # mtext(side = 2, text = resp.vars[i], outer = F)
       
       pred_plots <- plot[[m]]
@@ -326,28 +328,33 @@ all.var.imp %<>%
     theme_classic()
   
 # Make top model
-topmod <- gam(log.dem ~ 
-                s(log.depth, k = 3, bs = 'cr') + 
-                s(sqrt.decDuration, k = 3, bs = 'cr') +
-                s(centroidLat, k = 3, bs = 'cr') + 
-                s(log.reef, k = 3, bs = 'cr') +
-                s(log.lagoon, k = 3, bs = 'cr') + 
+topmod <- gam(Dem ~ 
+                s(log_depth, k = 3, bs = 'cr') + 
+                # s(sqrt.decDuration, k = 3, bs = 'cr') +
+                s(centroidLat, k = 3, bs = 'cr') +
+                # s(log.reef, k = 3, bs = 'cr') +
+                s(log_lagoon, k = 3, bs = 'cr') +
+                s(sqrt_rug, k = 3, bs = 'cr') + 
+                # s(pelagic, k = 3, bs = 'cr') + 
+                
                 s(PersonID, bs = 're'), 
-              family = 'poisson', 
+              # family = 'poisson', 
+              family = tw(), 
               data = dat)
 
 summary(topmod)
 AIC(topmod)
+gam.check(topmod)
 ```
 
 ## Predictions
 ```{r}
  # Make transformations
-  full_dat$Depth <- abs(full_dat$Depth)
-  full_dat$log.Depth <- log(full_dat$Depth + 1)
-  full_dat$log.Reef <- log(full_dat$Reef + 1)
-  full_dat$log.Lagoon <- log(full_dat$Lagoon + 1)
-  full_dat$sqrt.decDuration <- sqrt(full_dat$decDuration)
+  full_dat$log_depth <- log(full_dat$depth + 1)
+  # full_dat$log.reef <- log(full_dat$reef + 1)
+  full_dat$log_lagoon <- log(full_dat$lagoon + 1)
+  # full_dat$sqrt.decDuration <- sqrt(full_dat$decDuration)
+  full_dat$sqrt_rug <- sqrt(full_dat$rug)
 
 # Predict model onto big data
 full_dat <- cbind(full_dat, 
@@ -356,62 +363,68 @@ full_dat <- cbind(full_dat,
 full_dat %<>% 
   mutate(p_dem.fit = round(p_dem.fit, 2), p_dem.se.fit = round(p_dem.se.fit, 2))
 
+full_dat %<>% rename(pfit_dem = p_dem.fit,
+                     pse_dem = p_dem.se.fit) 
+
 # Check summary
-summary(full_dat$p_dem.fit)
+summary(full_dat$pfit_dem)
 ```
 
 ## Predictor plots
 ```{r}
 # define top mod predictors
-# top.preds <- c("log.Depth", "log.Reef", "log.Lagoon", "sqrt.decDuration", "centroidLat")
+# top.preds <- c("log.depth", "log.lagoon", "sqrt.decDuration", "centroidLat", "sqrt.rug")
 # 
-# grids <- full_dat %>% distinct(gridID_alt, .keep_all = TRUE)
+# grids <- full_dat %>% distinct(gridid_alt, .keep_all = TRUE)
 # 
+# plots <- NULL
 # # only works for spatial vars nmot people vars
 # for (i in 1:length(top.preds)) {
 #   plot <- ggplot(data = grids, aes_string(x = top.preds[i], y = "p_dem.fit")) +
 #     ylab("Predicted demersal catch") +
 #     geom_smooth(alpha = 0.75, size = 2, show.legend = FALSE) +
 #     theme_classic()
-#   
+# 
 #   plots[[i]] <- plot  # Add the plot to the list
 # }
-# 
+# # 
 # plots
 # 
 # people vars
 # t <- full_dat %>% distinct(PersonID, .keep_all = TRUE)
 # 
-# ggplot(data = t, aes(x = sqrt.decDuration, y = "p_dem.fit")) +
+# ggplot(data = grids, aes(x = sqrt.decDuration, y = "p_dem.fit")) +
 #     ylab("Predicted demersal catch") +
 #     geom_smooth(alpha = 0.75, size = 2, show.legend = FALSE) +
 #     theme_classic()
 ```
 
-# Spatial plots
+## Spatial plots
 ```{r}
-full_dat %<>% mutate(ID = row_number()) 
-sp_dat %<>% mutate(ID = row_number()) 
 
-sp_dat %<>% left_join(full_dat[, c("ID","p_dem.fit", "p_dem.se.fit")], by = "ID")
-
-sp_grid <- sp_dat %>% distinct(gridID_alt, .keep_all = TRUE) %>% 
-  st_as_sf()
+grid <- full_dat %>% distinct(gridid_alt, .keep_all = TRUE) %>%
+  st_as_sf()  
 
 ggplot() +
-  geom_sf(data = sp_grid$x, aes(fill = sp_grid$p_dem.fit), lwd = 0.05) +
-  scale_fill_gradient(name = "Demersal Catch") +
+  geom_sf(data = grid$grid_geom, aes(fill = grid$p_dem.fit), lwd = 0.05) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1) +
+  labs(fill = "Demersal\nCatch") +
   theme_classic()
 
 ggplot() +
-  geom_sf(data = sp_grid$x, aes(fill = sp_grid$p_dem.se.fit), lwd = 0.05) +
-  scale_fill_gradient(name = "Error: Demersal Catch") +
+  geom_sf(data = grid$grid_geom, aes(fill = grid$p_dem.se.fit), lwd = 0.05) +
+  scale_fill_distiller(palette = "YlGnBu", direction = -1) +
+  labs(fill = "Error: Demersal\nCatch") +
   theme_classic()
+```
 
-ggplot() +
-  geom_sf(data = sp_grid$x)
+# Store
+Need a data set with no geometry for stata
+```{r}
+grid %<>% dplyr::select(gridid_alt, br_geom, dat_geom, grid_geom) # spatial data to join later
+saveRDS(grid, "./data/gpkg/att_sp_dat.gpkg")
 
-ggplot() +
-  geom_histogram(data = full_dat, aes(x = p_dem.fit))
+full_dat %<>% dplyr::select(-c(br_geom, dat_geom, grid_geom)) # data for stata
+write_csv(full_dat, "./data/02_data/2.3_dat.csv")
 ```
 

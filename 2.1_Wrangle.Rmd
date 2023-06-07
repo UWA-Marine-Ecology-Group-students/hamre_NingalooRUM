@@ -292,6 +292,9 @@ dat %<>%
         # mutate(land_fc = round(as.numeric((cost/(100/12))*accom_br), 2)*2) %>% 
         # mutate(water_fc = round(as.numeric((cost/consump)*km_BR), 2)*2) %>% #changing fuel&cost
         # mutate(lm_fc = round(as.numeric((cost/lm_cons)*km_BR), 2)*2) %>% 
+        mutate(l_ffc = round(as.numeric((cost/cons_flt)*l_km_br), 2)) %>% 
+        mutate(nl_ffc = round(as.numeric((cost/cons_flt)*nl_km_br), 2)) %>% 
+  
         mutate(l_fc2l = round(as.numeric((cost/cons2l)*l_km_br), 2)) %>% 
         mutate(nl_fc2l = round(as.numeric((cost/cons2l)*nl_km_br), 2)) %>% 
   
@@ -316,15 +319,22 @@ dat %<>%
         mutate(l_tc3l = round(as.numeric(l_fc3l + l_trp_vott3l), 2)) %>% 
         mutate(nl_tc3l = round(as.numeric(nl_fc3l + nl_trp_vott3l), 2))
 
-dat <- dat %>% 
-  mutate(centroidLong = st_coordinates(centroid)[,1]) %>% # need this is using dynamic variables
-  mutate(centroidLat = st_coordinates(centroid)[,2])
-  
-dat_rum_df <- dat %>% dplyr::select(-c(centroid, br_geom, grid_geom, dat_geom))
+    dat <- dat %>% 
+      mutate(centroidLong = st_coordinates(centroid)[,1]) %>% # need this is using dynamic variables
+      mutate(centroidLat = st_coordinates(centroid)[,2])
+```
+
+# Transformations
+```{r}
+    dat %<>% mutate(logarea = log(area + 1)) 
 ```
 
 # Save output
 ```{r save}
+dat_rum_df <- dat %>% dplyr::select(-c(centroid, br_geom, grid_geom, dat_geom))
+
+dat_rum_df %<>% mutate(rug = as.numeric(rug)) # add this to static script
+
   write_csv(dat_rum_df, "./data/02_data/2.1_dat.csv")
   saveRDS(dat, paste0("./data/gpkg/sims/2.1_dat.gpkg")) # script 3.1
 

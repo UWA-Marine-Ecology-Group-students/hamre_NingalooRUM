@@ -38,9 +38,9 @@ coast <- st_read("./data/gpkg/coast.gpkg") %>%  st_transform(4283)
 #   filter(!is.na(UseLat), !is.na(UseLong)) %>%
 #   st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)
 
-dat %<>%
-  filter(!is.na(centroidLat), !is.na(centroidLong)) %>%
-  st_as_sf(coords = c("centroidLong", "centroidLat"), crs = 4283)
+# dat %<>%
+#   filter(!is.na(centroidLat), !is.na(centroidLong)) %>%
+#   st_as_sf(coords = c("centroidLong", "centroidLat"), crs = 4283)
 
 # sm_dat <- dat %>%  
 #   mutate(trp_grid = str)
@@ -57,7 +57,7 @@ dat %<>%
 coast_lambert <- coast %>%
   st_transform(crs = 3112) # need land lambert shp file loaded
 
-sst_kelvins <- get_sst(dat$TripDate, dat$centroidLong, dat$centroidLat) # getting sst
+sst_kelvins <- get_sst(dat$TripDate, Long = dat$centroidLong, Lat = dat$centroidLat) # getting sst
 
 sst_celcius <- round(sst_kelvins - 273.15, 2) # convert to celcius
 
@@ -75,6 +75,20 @@ dat$sst <- sst_celcius
 #   geom_sf(data = coast) +
 #   geom_sf(data = t, colour = 'red')
 
+# sst missing for one person 2020-09-25, trip 2
+# filling with data from day after
+
+tmp2 <- dat %>% 
+  filter(TripDate == "2020-09-26") %>% 
+  distinct(gridid_alt, .keep_all = T) %>% 
+  dplyr::select(gridid_alt, sst) %>% 
+  rename(sst2 = sst)
+
+dat %<>% left_join(tmp2)
+
+dat %<>% mutate(sst = is.na(sst), sst2, sst) 
+# which(is.na(dat$sst))
+
 # Missing data is centroid that are on land - dont think ill need it
 ```
 
@@ -82,31 +96,37 @@ dat$sst <- sst_celcius
 Data is extracted for morning: 8-10, midday: 11-1 and afternoon: 2-4. 
 Not very high res - not useful for area whith lots of islands like Esperance. 
 ```{r hs and ws}
-# hsws <- get_hs_ws_day(spdat$Date, spdat$centroidLong, spdat$centroidLat) # getting hs and ws
-# 
-# # making a numeric hour column
-# spdat$MedianHour <- as.numeric(gsub("\\:.*$", "", spdat$MedianTime))
-# 
-# # catagorising time of day
-# spdat$TimeOfDay <- with(spdat,  ifelse(MedianHour >= 5 & MedianHour <= 10, "Morning",
-#                             ifelse(MedianHour >= 11 & MedianHour <= 13, "Midday", 
-#                                    ifelse(MedianHour >= 14 & MedianHour <= 18, "Afternoon", NA))))
-# # spdat[, c("MedianTime", "MedianHour", "TimeOfDay")] # check it has worked
-# 
-# hsws_df <- as.data.frame(hsws)
-# 
-# spdat <- spdat %>% 
-#   mutate(SwellHeight = ifelse(TimeOfDay %in% "Morning", hsws$hs_morning,
-#                               ifelse(TimeOfDay %in% "Midday", hsws$hs_midday, hsws$hs_afternoon))) %>% 
-#   mutate(WindSpeed = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
-#                               ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
-#                                      hsws$wspeed_afternoon)))
+hsws <- get_hs_ws_day(dat$TripDate, dat$centroidLong, dat$centroidLat) # getting hs and ws
+
+# making a numeric hour column
+dat$MedianHour <- as.numeric(gsub("\\:.*$", "", dat$MedianTime))
+
+# catagorising time of day
+dat$TimeOfDay <- with(dat,  ifelse(MedianHour >= 5 & MedianHour <= 10, "Morning",
+                            ifelse(MedianHour >= 11 & MedianHour <= 13, "Midday",
+                                   ifelse(MedianHour >= 14 & MedianHour <= 18, "Afternoon", NA))))
+# spdat[, c("MedianTime", "MedianHour", "TimeOfDay")] # check it has worked
+
+hsws_df <- as.data.frame(hsws)
+
+dat %<>%
+  mutate(swell = ifelse(TimeOfDay %in% "Morning", hsws$hs_morning,
+                              ifelse(TimeOfDay %in% "Midday", hsws$hs_midday, hsws$hs_afternoon))) %>%
+  mutate(wind = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
+                              ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
+                                     hsws$wspeed_afternoon)))
 ```
 
 # Save output
 ```{r save}
-saveRDS(dat, "./data/02_data/2.2_Site_4283.gpkg")
+# save a dynamic vars frame to be joined on later if you need
+dyn_cov <- dat %>% dplyr::select(gridid_alt, TripID, sst, swell, wind)
+write_csv(dyn_cov, "./data/02_data/2.2_dyn_cov.csv")
 
+# save with geoms
+saveRDS(dat, "./data/02_data/2.2_dat.gpkg")
+
+# data frame with no geom for stata
 dat_df <- dat %>%  st_drop_geometry %>% as.data.frame()
 write.csv(dat, "./data/02_data/2.2_dat.csv")
 ```

@@ -1,5 +1,6 @@
 # Setup
 ```{r setup, include = FALSE}
+rm(list = ls())
 
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, cache = TRUE, fig.align = 'center', fig.width = 10, fig.height = 7) 
 
@@ -59,6 +60,9 @@ Aim is to have matrix with same row names and column names
     
 nrow(b) == length(v) # should be true
 length(v) == nrow(v) # should be true
+
+# write.csv(b, "./data/03_data/bioec_coefs.csv")
+# write.csv(v, "./data/03_data/bioec_covmat.csv")
 ```
 
 # Transformation
