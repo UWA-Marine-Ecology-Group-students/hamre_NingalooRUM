@@ -1,7 +1,9 @@
-# Wrangle data for ASC RUM
+This script creates a grid with associated attributes from a ASC RUM. 
 
-## Set up
+# Set up
 ```{r setup}
+    rm(list = ls())
+
     # knitr options
     knitr::opts_chunk$set(warning = FALSE, message = TRUE, echo = FALSE, fig.align =
                             'center', fig.width = 10, fig.height = 7) 
@@ -45,14 +47,22 @@
       st_transform(crs = 4283) %>% 
       dplyr::select(geom) 
     
-    hol <- read_csv("./data/RAW/Holidays.csv") %>%
-      mutate(Date = as.POSIXct(Date, format = "%d/%m/%y"))
+    hol <- read_csv("./data/RAW/Holidays.csv") %>% 
+      mutate(Date = as.Date(Date, format = "%d/%m/%y"))
 
     # consump <- read.csv("./data/RAW/consump.csv")
     
     boat_perf <- read.csv("./data/RAW/boatengines.csv")
     
     vott <- read.csv("./data/RAW/VOTT.csv")
+    
+    habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
+      st_transform(crs = 4283) %>% 
+      st_make_valid() %>% 
+      mutate(habitat = tolower(habitat))
+    
+    gulf <- st_read("./data/gpkg/exgulf.gpkg") %>% 
+      st_transform(crs = 4283)
     
     # get fuel csv from here
     # https://www.fuelwatch.wa.gov.au/retail/monthly
@@ -80,38 +90,45 @@
     sf_use_s2(FALSE)
 ```
 
-## Data prep
-
+# Joining external data
+## Fuel
 ```{r}
-
 fuel %<>%
   mutate(TripMonth = gsub("[^a-zA-Z]", "", Month)) %>%
+  mutate(season = ifelse(TripMonth %in% c("Sep", "Oct"), "Spring", 
+                           ifelse(TripMonth %in% c("Jul", "Aug"), "Winter",
+                                  "Autumn"))) %>% 
   mutate(numYear = as.numeric(paste0("20", as.numeric(gsub("[^0-9]", "", Month))))) %>%
   mutate(cost = Average/100)
 
 dat %<>% left_join(fuel[, c("TripMonth", "numYear", "cost")])
+```
 
+## Boat length
+Predicting as a function of party size to fill NAs
+```{r}
+# dat %<>% rename(PartySize = Party)
+# tmp <- dat %>% filter(is.na(BoatLength) & SiteType == "Boat") %>% dplyr::select(TripID, BoatLength, PartySize)
+# # unique(tmp$Party)
+# 
+# # Filling Party size where it exists
+# tmp %<>% mutate(PartySize = ifelse(PartySize %in% c("6f", "Two couples 2 kids", "3F, 2M, 1b"), 6, 
+#                                     ifelse(PartySize %in% c("2f", "2 dudes", "2males", "Couple", "1M 1b"), 2, 
+#                                            ifelse(PartySize %in% c("2f, 2kids", "4 friends", "2 couples", "4 mates", "1m1b", "Couple, 2g", "Couple,2g 1b"), 4,
+#                                                   ifelse(PartySize %in% c("Man", "1M"), 1, 
+#                                                          ifelse(PartySize %in% c("2b1g", "3M", "3m"), 3, NA))))))
+# 
+#       tmp$lm_bl <- predict(bl_mod, tmp) # predicting boatlength using party size
+#       tmp$lm_bl <- round(as.numeric(tmp$lm_bl), 2)
+#       dat %<>%  left_join(tmp[, c("TripID", "lm_bl")])
+#       
+#       dat %<>% 
+#         mutate(BoatLength = ifelse(SiteType == "Boat" & !is.na(lm_bl), lm_bl, BoatLength)) %>% # appending modelled boat length
+#         mutate(BoatLength = ifelse(SiteType == "Boat" & is.na(BoatLength), mean(BoatLength, na.rm = T), BoatLength)) # filling rest of boat length with NAs
+```
 
-# Boat Length - need to fill in NAs where possible
-dat %<>% rename(PartySize = Party)
-tmp <- dat %>% filter(is.na(BoatLength) & SiteType == "Boat") %>% dplyr::select(TripID, BoatLength, PartySize)
-# unique(tmp$Party)
-
-# Filling Party size where it exists
-tmp %<>% mutate(PartySize = ifelse(PartySize %in% c("6f", "Two couples 2 kids", "3F, 2M, 1b"), 6, 
-                                    ifelse(PartySize %in% c("2f", "2 dudes", "2males", "Couple", "1M 1b"), 2, 
-                                           ifelse(PartySize %in% c("2f, 2kids", "4 friends", "2 couples", "4 mates", "1m1b", "Couple, 2g", "Couple,2g 1b"), 4,
-                                                  ifelse(PartySize %in% c("Man", "1M"), 1, 
-                                                         ifelse(PartySize %in% c("2b1g", "3M", "3m"), 3, NA))))))
-
-      tmp$lm_bl <- predict(bl_mod, tmp) # predicting boatlength using party size
-      tmp$lm_bl <- round(as.numeric(tmp$lm_bl), 2)
-      dat %<>%  left_join(tmp[, c("TripID", "lm_bl")])
-      
-      dat %<>% 
-        mutate(BoatLength = ifelse(SiteType == "Boat" & !is.na(lm_bl), lm_bl, BoatLength)) %>% # appending modelled boat length
-        mutate(BoatLength = ifelse(SiteType == "Boat" & is.na(BoatLength), mean(BoatLength, na.rm = T), BoatLength)) # filling rest of boat length with NAs
-        
+## VOTT
+```{r}
 # VOTT 
     dat %<>% left_join(vott[, c("Postcode", "ann_inc_21", "VOTT_21")]) 
 
@@ -131,9 +148,12 @@ tmp %<>% mutate(PartySize = ifelse(PartySize %in% c("6f", "Two couples 2 kids", 
       dat %<>%
         mutate(ann_inc = ifelse(!is.na(ann_inc_21), ann_inc_21, lm_ann_inc)) %>% 
         mutate(ann_inc = ifelse(is.na(ann_inc), mean(ann_inc, na.rm = T), ann_inc)) %>% 
-        mutate(VOTT = round(ann_inc/(38*52), 2))
- 
- # Consumption
+        mutate(VOTT = round((ann_inc/(38*52))/3, 2))
+```
+
+## Boat specs
+```{r}
+# Consumption
 boat_perf %<>%  
   filter(kmperh < 4000) %>% 
     mutate(boat_size2L = ifelse(boatlength <= 3.75, "S", "L")) %>%
@@ -152,17 +172,16 @@ boat2L <- boat_perf %>%
             cons2l = median(cons))
   
 dat %<>% 
-   # mutate(BoatLength = ifelse(is.na(BoatLength), mean(BoatLength, na.rm = TRUE), BoatLength)) %>%
+  mutate(BoatLength = ifelse(is.na(BoatLength), mean(BoatLength, na.rm = TRUE), BoatLength)) %>%
   mutate(boat_size2L = ifelse(BoatLength <= 3.75, "S", "L")) %>%
   mutate(boat_size3L = ifelse(BoatLength <= 3.75, "S", 
-                            ifelse(BoatLength <= 6.75, "M", "L"))) %>% 
+                            ifelse(BoatLength <= 6.75, "M", "L")))  %>% 
   left_join(boat2L[, c("boat_size2L", "cons2l", "sp2l")], by = "boat_size2L") %>% 
   left_join(boat3L[, c("boat_size3L", "cons3l", "sp3l")], by = "boat_size3L")
 
 dat %<>% 
   mutate(cons_flt = median(boat_perf$cons)) %>% 
   mutate(sp_flt = median(boat_perf$kmperh))
-  
 
 # modeled consumption
  temp <- dat %>% 
@@ -180,8 +199,8 @@ dat %<>%
 rm(fuel, boat2L, boat3L, vott, temp, gam_cons, sp_cons, cons_mod, sp_mod, tmp, bl_mod)
 ```
 
+# Filtering
 All data filters have to be done before making the choice set.
-
 ```{r}
     dat %<>% 
       filter(ActivityType == "Extractive") %>% # filtering activity
@@ -201,61 +220,71 @@ All data filters have to be done before making the choice set.
       identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
 ```
 
-
+# Weighting
 ```{r}
-    # for getting survey weights
-    dat <- dat %>%
-      mutate(SurveyDate_posix = as.POSIXct(SurveyDate, format = "%m/%d/%Y %H:%M:%S") +
-               8*60*60) %>%
-      mutate(Time = format(SurveyDate_posix, "%p")) %>%
-      mutate(DayType = weekdays(SurveyDate_posix, abbreviate = TRUE)) %>%
-      mutate(DayType = ifelse(DayType %in% c("Sat", "Sun"), "Weekend", "Weekday")) %>%
-      mutate(SurveyDate_posix = as.POSIXct(SurveyDate, format = "%m/%d/%Y")) %>%
-      mutate(Hol = ifelse(SurveyDate_posix %in% hol$Date, hol$Holiday, NA)) %>%
-      mutate(DayType = ifelse(Hol %in% "public", "Weekend", DayType)) %>%
-      mutate(Hol = ifelse(Hol %in% "school", 1, 0)) %>%
-      unite("psuid", c(SurveyDate_posix, Time), remove = F, sep = " ")
+    # prep for getting survey weights
+    # will duplicate rows which are in public and school holiday - changing to school for weighting and removing duplicates
+    dat %<>% left_join(hol, by = c("SurveyDate" = "Date"))
 
+    tmp <- dat[which(duplicated(dat$TripID)), ] %>% dplyr::select(TripID)
+
+    dat %<>%  mutate(Holiday = ifelse(dat$TripID %in% tmp$TripID, "school", Holiday)) %>% distinct()
     
-    # # calculating even weights
-    # dat <- even_weights(df = dat, psuid = psuid, w_col = "Time")
-    dat <- even_weights(df = dat, psuid = psuid, w_col = "Site")
+    dat <- dat %>%
+      mutate(DayType = weekdays(Date_posix, abbreviate = TRUE)) %>% 
+      mutate(DayType = ifelse(DayType %in% c("Sat", "Sun"), "Weekend", "Weekday")) %>%
+      mutate(DayType = ifelse(Holiday %in% "public", "Weekend", DayType)) %>%
+      mutate(Holiday = as.factor(ifelse(Holiday %in% "school", "1", "0"))) %>%
+      unite("psuid", c(SurveyDate, Time, Site), remove = F, sep = " ")
 
-    # calculate uneven weights
+    # calculating nipw weights
+    ## site
+    w_site <- even_nipw(df = dat, psuid = psuid, w_col = "Site") 
+    dat %<>% left_join(w_site[, c("Site", "Site_nipw")])
+    
+    # time
+    w_time <- even_nipw(df = dat, psuid = psuid, w_col = "Time") 
+    dat %<>% left_join(w_time[, c("Time", "Time_nipw")])
+      
+    ## holiday - not balanced
     # Holidays
-    dny <- (n_distinct(dat$facYear)*365)
-    nhol <- hol %>% filter(Holiday == "school")  %>% nrow()
-    w_hol1 = nhol/dny
-    w_hol0 = (dny - nhol)/dny
-
-    ## checkpoint: == 1
-    w_hol1 + w_hol0
-
-    # append
-    dat %<>% mutate(w_hol = ifelse(Hol %in% 1, w_hol1, w_hol0))
+    nhol <- hol %>% filter(Holiday == "school")  %>% nrow() # dates of school holidays in sample year
+    
+    w_hol <- as.data.frame(table(dat$Holiday)) %>% 
+      mutate(target = ifelse(Var1 %in% 0, ((365*4) - nhol)/(365*4), nhol/(365*4))) %>% 
+      mutate(real = Freq/(sum(Freq))) %>% 
+      mutate(ipw = target/real) %>% 
+      mutate(hol_nipw = ipw/(sum(ipw))) %>% 
+      rename(Holiday = Var1)
+    
+    sum(w_hol$hol_nipw)  # checkpoint: == 1 
+    dat %<>% left_join(w_hol[, c("Holiday", "hol_nipw")]) # append
 
     # DayType
-    wdat <- dat %>% distinct(psuid, .keep_all = TRUE)
-    daytype_smpl <- as.data.frame(table(wdat$DayType)) %>%
-      mutate(w = ifelse(Var1 %in% "Weekend", Freq/(2*52), Freq/(5*52))) %>%
-      mutate(w_daytype = w/sum(w)) %>% # scaling
+    wdat <- dat %>% distinct(psuid, .keep_all = TRUE) # filtering to primary sampling units
+    
+    w_daytype <- as.data.frame(table(wdat$DayType)) %>%
+      mutate(target = ifelse(Var1 %in% "Weekend", (4*(2*52))/360, (4*(5*52))/360)) %>%
+      mutate(real = Freq/sum(Freq)) %>% 
+      mutate(ipw = target/real) %>% 
+      mutate(dt_nipw = ipw/sum(ipw)) %>% 
       rename(DayType = Var1)
-
-    ## checkpoint: == 1
-    sum(daytype_smpl$w_daytype)
-
-    # append
-    dat %<>% left_join(daytype_smpl[, c("DayType", "w_daytype")])
+    
+    sum(w_daytype$dt_nipw) # checkpoint: == 1
+    dat %<>% left_join(w_daytype[, c("DayType", "dt_nipw")])  # append
 
     # overall weight
-    dat %<>% mutate(smpl_w = w_Site*w_hol*w_daytype)
+    dat %<>% mutate(ipw = Site_nipw + hol_nipw + dt_nipw + Time_nipw) # w_time removed so same as south cpoast
+    
+    # dat %<>% mutate(nipw = ipw/sum(ipw))
+    # 
+    # sum(dat$nipw)
 ```
 
-## ASC grid and simulation stats
+# ASC grid
 
 Creates smallest ASC grid possible within the base grid, given the distribution of data. Each cell must have at least 1 data point in it. 
 Calculates basic stats for simulation and current marine park (eg. area, beach access etc.)
-
 ```{r message = FALSE}
 # asc grid
     grid <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03,
@@ -264,11 +293,60 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
 #'[#NOTE:Check empty grids before removing]  
   emp <- grid[which(grid$data_present == FALSE),]
   grid %<>% filter(gridID_alt != emp$gridID_alt) 
+  
+  ggplot() +
+  geom_sf(data = grid, aes(fill = area))
 ```
 
-## Attributes
+# Grid attributes
 
+## Habitat
+Calculates the area (km2) of each habitat type in each individual grid cell (site)
+```{r habitat}
+# grid <- habitat_area(sf_habitat = habitat, col_habitat = 1, sf_grid = grid, id_grid = gridID) # need to update updated pivot wioder from spread
+habitat %<>% st_make_valid() %>% filter(habitat != "pelagic")
+hab <- st_intersection(habitat, grid) # This gives you all the individual areas where there is overlap between the habitat and grid, includes original ID
+hab <- st_make_valid(hab) # make intersection valid
+hab$hab_area <- round(set_units(st_area(hab), km^2), 2) # calculate the area of each habitats in intersection grids
+hab %<>% mutate(hab_area = as.numeric(hab_area))
+hab <- hab %>% pivot_wider(names_from = "habitat", values_from = "hab_area", values_fill = 0)
 
+habs <- unique(habitat$habitat)
+
+hab_grid <- hab %>%
+  group_by(gridID_alt) %>%
+  summarise_at(habs, .funs = sum, .keep_all = T) %>%
+  ungroup() %>%
+  st_drop_geometry()
+
+hab_grid[2:4] <- hab_grid[2:4] - 1 # dont know why function above is summing and adding 1
+
+#'[#VALIDATE: there should be one row for every individual grid ID]
+
+grid %<>% left_join(hab_grid, by = "gridID_alt")
+
+# checks
+which(grid$lagoon > grid$area)
+which(grid$rreef > grid$area)
+which(grid$reef > grid$area)
+
+summary(grid$lagoon)
+summary(grid$rreef)
+summary(grid$reef)
+
+ggplot()+
+  geom_sf(data = grid, aes(fill = lagoon), lwd = 0.05)
+ggplot()+
+  geom_sf(data = grid, aes(fill = rreef), lwd = 0.05)
+ggplot()+
+  geom_sf(data = grid, aes(fill = reefs), lwd = 0.05)
+
+grid %<>% mutate(reefs = rreef + reef) # sum reefs into one
+
+#ADD IN chnage NA to 0
+```
+
+## Dist from BR
 ```{r}
 # st_geometry(grid) <- "geom"
 
@@ -284,8 +362,7 @@ Calculates basic stats for simulation and current marine park (eg. area, beach a
       rename(offshore_dist = km_mainland)
 ```
 
-### Land Present
-
+## Land
 ```{r land present}
 
 coast %<>%  st_cast("POLYGON")
@@ -309,7 +386,41 @@ ggplot() +
   geom_sf(data = grid$asc_geom, aes(fill = as.factor(grid$isl_adj)))
 ```
 
-## Data wrangle
+## Depth
+```{r}
+    grid <- mean_depth(bathy, grid) # get average depth of grid
+    grid %<>% mutate(depth = abs(depth))
+
+    ggplot() +
+      geom_sf(data = grid, aes(fill = depth), lwd = 0.05) + 
+      scale_fill_continuous(trans = 'reverse') +
+      theme_classic()
+```
+
+## Rugousity
+```{r}
+rug <- terra::terrain(bathy, v = c("roughness"))
+
+rugousity <- raster::extract(rug, grid, na.rm = TRUE, fun = max)
+
+grid$rug <- as.numeric(rugousity)
+
+# check
+plot(rug) 
+
+ggplot() +
+  geom_sf(data = grid, aes(fill = rug), lwd = 0.05) + theme_classic()
+```
+## Gulf
+```{r}
+grid %<>% 
+  mutate(gulf = ifelse(as.list(st_intersects(grid, gulf)) %in% "integer(0)", 0, 1))
+
+ggplot() +
+  geom_sf(data = grid, aes(fill = as.factor(gulf)), lwd = 0.05) + theme_classic()
+```
+
+## Append data
 ```{r}
     # isolating grid ID to append to dat
     gridID_vis <- grid %>%
@@ -317,14 +428,46 @@ ggplot() +
       distinct()
 
     # allocating sites to grids
-    dat  %<>% st_join(gridID_vis, left = T, join = st_intersects)
-
+    dat  %<>% 
+      st_join(gridID_vis, left = T, join = st_intersects) 
+    
+     # check there are no missing gridID_vis
+    a <- dat[which(is.na(dat$gridID_alt)), ]
+    a
+    ggplot() +
+      geom_sf(data = grid) +
+      geom_sf(data = a)
+    
+    # fill missing gridID_vis with nearest adjacent if applicable
+    tmp <- dat %>% filter(is.na(dat$gridID_alt)) %>% dplyr::select(TripID)
+    
+    tmp %<>% st_join(gridID_vis, join = st_nearest_feature)
+    # check filling in the missing gridID vis has worked
+    g <- grid %>% filter(gridID_alt == tmp$gridID_alt)
+     
+    ggplot() +
+      geom_sf(data = grid) +
+      geom_sf(data = g, fill = 'red')+
+      geom_sf(data = a)
+    
+    # append missing gridIDs
+    tmp %<>% st_drop_geometry()
+    
+   dat %<>% 
+     left_join(tmp, by = c("TripID")) %>% 
+     mutate(gridID_alt.x = ifelse(is.na(gridID_alt.x), gridID_alt.y, gridID_alt.x)) %>% 
+     rename(gridID_alt = gridID_alt.x) %>% 
+     dplyr::select(-gridID_alt.y)
+    
     # selecting attributes, and tidying
     dat %<>%
       rename(gridID_vis = gridID_alt, dat_geom = geometry) %>%
       #'[#NOTE: select vars for model] 
       #'Mandatory vars: TripID, PersonID, gridID_vis, Site, BoatLength  
-      dplyr::select(TripID, PersonID, gridID_vis, Site, TripDate, MedianTime, BoatLength, cost, smpl_w, Postcode, cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, VOTT, ann_inc, KeptUndam, Dem, Dem_bin, Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, decDuration) %>% 
+      dplyr::select(TripID, PersonID, gridID_vis, Site, TripDate, MedianTime, BoatLength, cost, ipw, Postcode, 
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, VOTT, ann_inc, 
+                    KeptUndam, CaughtUndam,Dem, Dem_bin, Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, 
+                    decDuration, FishingType) %>%
       distinct() %>%
       mutate(RampID = ifelse(Site %in% "ExmouthBR", 85, NA),
              RampID = ifelse(Site %in% "CoralBayBR", 72, RampID),
@@ -334,14 +477,8 @@ ggplot() +
       # mutate(UseLat = st_coordinates(.)[,2]) %>%
       # dplyr::select(-Site) %>%
       as.data.frame()
-
-    # check there are no missing gridID_vis
-    # a <- dat[which(is.na(dat$gridID_vis)), ]
-    # a
-    # 
-    # ggplot() +
-    #   geom_sf(data = grid$asc_geom) +
-    #   geom_sf(data = a$dat_geom)
+    
+    # ifelse(is.na(dat$gridID_vis)) {st_join(dat, gridID_vis, join = st_nearest_feature)}
     
     #'[#VALIDATE: TRUE, there are no unassigned gridIDs]
     
@@ -356,11 +493,11 @@ ggplot() +
     
     t1*nrow(gridID_vis) == nrow(dat)
 ```
-## Distance to BR
+
+# Fisher attributes
+## Distance BR to use
 
 Distance from the boat ramp to the centroid of data points in each grid that launched from that boat ramp - if not takes centroid of grid cell. 
-
-
 ```{r message=FALSE}
 #'[#NOTE:could wrap below bit in separate function - use_centroid and other could be site_centroid] 
 
@@ -396,6 +533,7 @@ Distance from the boat ramp to the centroid of data points in each grid that lau
     dist %<>% gather("BRdist", "use.centroid_km.br", 1:len) 
     dist[] <- sapply(dist, as.numeric) # change all cols to numeric
     
+    
     dist <- dist %>% 
       filter(RampID == BRdist) %>% 
       dplyr::select(-c(id, BRdist)) %>% 
@@ -422,23 +560,14 @@ Distance from the boat ramp to the centroid of data points in each grid that lau
     #   ggtitle("Check distances look accurate")
 ```
 
-### Envrionmental covariates
-```{r message=FALSE}
-# Depth
-tmp <- dat %>% dplyr::select(TripID, gridID_alt, asc_geom) %>% st_as_sf() 
-tmp <- mean_depth(bathy, tmp) # get average depth of grid
-tmp %<>% as.data.frame() 
-
-dat$Depth <- tmp$Depth
-dat$Depth <- abs(dat$Depth) # makes posotive
-
-# Swell
+## Swell
+```{r}
 dat %<>%
-    mutate(Long = st_coordinates(centroid)[,1]) %>%
-    mutate(Lat = st_coordinates(centroid)[,2])
+    mutate(centLong = st_coordinates(centroid)[,1]) %>%
+    mutate(centLat = st_coordinates(centroid)[,2])
 
   #extracting swell
-   hsws <- get_hs_ws_day(dat$TripDate, dat$Long, dat$Lat) # getting hs and ws
+   hsws <- get_hs_ws_day(dat$TripDate, dat$centLong, dat$centLat) # getting hs and ws
 
    # making a numeric hour column
   dat$MedianHour <- as.numeric(gsub("\\:.*$", "", dat$MedianTime))
@@ -457,52 +586,56 @@ dat %<>%
     mutate(wind = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
                                 ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
                                        hsws$wspeed_afternoon)))
-  
-# SST
-  coast_lambert <- coast %>% st_transform(crs = 3112) # need land lambert shp file loaded
-
-  sst_kelvins <- get_sst(Dates = dat$TripDate, Long = dat$Long, Lat = dat$Lat) # getting sst
-  
-  sst_celcius <- sst_kelvins - 273.15 # convert to celcius
-  
-  dat$sst <- sst_celcius
-
-  # tetsing new function
-  t <- dat %>% distinct(TripDate, .keep_all = TRUE) %>% filter(TripID %in% c(34, 36, 42))
-  
-  sst_kelvins <- get_sst(Dates = t$TripDate, Long = t$Long, Lat = t$Lat) # getting sst
 ```
-
-## Choice and travel cost ($0.54/km)
+ 
+## Cost and choice
 ```{r choice and travel cost}
-# 
- cons <- median(consump$consump)
 
-      dat <- dat %>%
-        filter(!is.na(Postcode)) %>% 
-        # mutate(boat_size = ifelse(BoatLength <= 4.5, "S",
-        #                           ifelse(BoatLength > 4.5 & BoatLength <= 6, "M",
-        #                                  "L"))) %>% 
-        mutate(boat_size = ifelse(BoatLength <= 3.75, "S", "L")) %>%
-        left_join(consump[, c("boat_size", "consump", "speed")], by = "boat_size") %>%
-        mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>%
-        mutate(fc = round(as.numeric((cost/consump)*km_BR), 2))
-        # mutate(fc = round(as.numeric((cost/cons)*km_BR), 2))
-        # mutate(travelTime = round(site.centroid_km.br/speed, 2)) %>% 
-        # left_join(vott[, c("Postcode", "ann_inc", "VOTT")]) %>% 
-        # mutate(VOTT = round(VOTT*travelTime, 2)) %>% 
-        # mutate(tc = round(VOTT + fc, 2))
+       dat <- dat %>%
+        mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>% 
+      #   # mutate(land_fc = round(as.numeric((cost/(100/12))*accom_br), 2)*2) %>% 
+      #   # mutate(water_fc = round(as.numeric((cost/consump)*km_BR), 2)*2) %>% #changing fuel&cost
+      #   # mutate(lm_fc = round(as.numeric((cost/lm_cons)*km_BR), 2)*2) %>% 
+      #  
+         # fuel cost
+        mutate(fc_flt = round(as.numeric((cost/cons_flt)*km_BR), 2)) %>% # policy mod
+        mutate(fc2l = round(as.numeric((cost/cons2l)*km_BR), 2)) %>%
+        mutate(fc3l = round(as.numeric((cost/cons3l)*km_BR), 2)) %>%
+        mutate(fc_gam = round(as.numeric((cost/gam_cons)*km_BR), 2)) %>%
   
+      #   
+        # travel time
+        mutate(trvlTime_flt = round(as.numeric(km_BR/sp_flt, 2))) %>%
+        mutate(trvlTime2l = round(as.numeric(km_BR/sp2l, 2))) %>%
+        mutate(trvlTime3l = round(as.numeric(km_BR/sp3l), 2)) %>%
+        mutate(trvlTime_gam = round(as.numeric(km_BR/gam_sp), 2)) %>% # policy mod
 
-    #'[#NOTE: Remember to add your interactions]  
+        #  trip vott
+        mutate(trp_vott_flt = round(as.numeric(VOTT*trvlTime_flt), 2)*2) %>%
+        mutate(trp_vott2l = round(as.numeric(VOTT*trvlTime2l), 2)*2) %>%
+        mutate(trp_vott3l = round(as.numeric(VOTT*trvlTime3l), 2)*2) %>%
+        mutate(trp_vott_gam = round(as.numeric(VOTT*trvlTime_gam), 2)*2) %>% # policy mod
 
-    # dat %<>%
-    #   mutate(blkm = BoatLength*offshore_dist) %>% 
-    #   mutate(tcinc = tc*ann_inc) %>% 
-    #   mutate(kmkids = kids*offshore_dist)
+        # total cost
+        mutate(tc_flt = round(as.numeric(fc_flt + trp_vott_flt), 2)) %>%
+        mutate(tc2l = round(as.numeric(fc2l + trp_vott2l), 2)) %>%
+        mutate(tc3l = round(as.numeric(fc3l + trp_vott3l), 2)) %>% 
+        mutate(tc_gam = round(as.numeric(fc_gam + trp_vott_gam), 2)) %>% 
+  
+        mutate(fcflt_sp2l = round(as.numeric(fc_flt + trp_vott2l), 2)) %>% 
+        mutate(fcflt_sp3l = round(as.numeric(fc_flt + trp_vott3l), 2)) %>% 
+        mutate(fcflt_spgam = round(as.numeric(fc_flt + trp_vott_gam), 2)) ## policy mod
 
     #'[#VALIDATE: TRUE, should equal number of trips]
     sum(dat$choice) == n_distinct(dat$TripID)
+```
+## Transformations
+```{r}
+    dat$arealog <- log(dat$area + 1)
+    dat$offdist_log <- log(dat$offshore_dist + 1)
+    # dat$offdist_log_kids <- dat$offdist_log * dat$kids
+    dat$fcflt_aninc <- dat$fc_flt * dat$ann_inc
+    dat$bl_offdist <- dat$BoatLength * dat$offdist_log
 ```
 
 ## Filtering SZ

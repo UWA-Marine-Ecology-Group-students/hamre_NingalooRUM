@@ -36,7 +36,9 @@
     
     # artInfra <- st_read("./data/gpkg/ArtReef.gpkg")
     
-    ntz <- st_read("./data/gpkg/ntz.gpkg") # commonwealth and current state NTZ
+    # ntz <- st_read("./data/gpkg/ntz.gpkg") # commonwealth and current state NTZ
+    ntz <- st_read("./data/gpkg/Ning_sim+sz.gpkg") # commonwealth and current state NTZ
+    
     
      habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
       st_transform(crs = 4283) %>% 
@@ -48,15 +50,18 @@
     sf_use_s2(FALSE)
     
     # check layers
-    ggplot() +
-      geom_sf(data = ext, lwd = 0.05) +
-      geom_sf(data = coast) +
-      geom_sf(data = BR, colour = 'red') +
-      geom_sf(data = ntz)
+    # ggplot() +
+    # # geom_sf(data = tmp, lwd = 0.05)
+    # # geom_sf(data = ext, lwd = 0.05) +
+    # # geom_sf(data = coast) +
+    # # geom_sf(data = BR, colour = 'red') +
+    # geom_sf(data = sim)
     
-    ggplot() +
-      geom_sf(data = habitat, aes(fill = habitat), lwd = 0.1)
+    # ggplot() +
+    #   geom_sf(data = habitat, aes(fill = habitat), lwd = 0.1)
 ```
+
+
 # Make grid
 ```{r}
   grid <- st_difference(ext, st_union(st_combine(ntz))) # cut npz out of sims
@@ -178,6 +183,7 @@ Calculates the area (km2) of each habitat type in each individual grid cell (sit
 ## Land
 Distance to mainland: Calculates the linear distance from the centroid of every grid cell (site) to the nearest point on mainland.
 Adjacent to land: Creates binary list indicating whether there is an island are adjacent to grid cell (site).
+
 ```{r land present}
 coast %<>% st_cast("POLYGON")
 coast$area <- as.numeric(set_units(st_area(coast), km^2)) # area of polygons in coast sf
@@ -218,12 +224,15 @@ Calculates the linear and non-linear distance from each boat ramp to every centr
 ```{r distance to BR}
   # create distanec matrix
   dist <- dist(grid$centroid, BR$geometry, BR$RampID, grid$gridid) # create distance dataframe
-  dist %<>% left_join(BR[, c("RampID", "br_geom")]) # append ramp geom
+  BR %<>% mutate(RampID = as.character(RampID)) 
+
+  dist %<>% left_join(BR[, c("RampID", "geometry")]) # append ramp geom
   
   # append distance to grid
   grid %<>% left_join(dist, by = "gridid") # join to input data
   nrow(grid) == n_distinct(grid$gridid)*nrow(BR) # check dataset is the correct size
   
+  grid %<>% rename(br_geom = geometry) 
 
     ggplot(grid) +
       geom_sf(aes(geometry = grid_geom, fill = nl_km_br), lwd = 0.25) +

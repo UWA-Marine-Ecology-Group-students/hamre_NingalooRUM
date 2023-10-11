@@ -1,5 +1,7 @@
 # Set Up
 ```{r setup, include = FALSE}
+  rm(list = ls())
+
 # librarys
 library(tidyverse)
 library(dplyr)

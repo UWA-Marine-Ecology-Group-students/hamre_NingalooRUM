@@ -1,0 +1,51 @@
+# Setup
+```{r setup, include = FALSE}
+  rm(list = ls())
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, cache = TRUE, fig.align = 'center', fig.width = 10, fig.height = 7) 
+
+# libraries
+library(tidyverse)
+library(readxl)
+library(magrittr)
+library(MASS)
+library(matrixStats)
+library(dplyr)
+library(data.table)
+library(gtable)
+library(gridExtra)
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+library(sf)
+
+# data
+dat <- read_csv(paste0("./data/03_data/asc_vs_att.csv")) # for when no data is models eg. catch rate
+
+source("./functions/theme.R")
+```
+
+```{r}
+dat %>% 
+  arrange(BIC) %>%
+  ggplot(aes(x = fct_reorder(label, BIC), y = BIC)) +
+  geom_col(fill = col) +
+  xlab("Model") +
+  ylab("BIC") +
+  my_theme +
+  theme(plot.margin = margin(0.5,0.5,0.5,0.5, "cm")) +
+  theme(axis.text.x = element_text(angle = 45))
+
+dat %>% 
+  arrange(BIC) %>%
+  ggplot(aes(x = fct_reorder(label, BIC), y = median_trip)) +
+  geom_col(fill = col) +
+  geom_errorbar(aes(ymin = LCI_trip, ymax = UCI_trip), size = 0.5, width = 0.1) +
+  xlab("Model") +
+  ylab("Trip Impact") +
+  my_theme +
+  theme(plot.margin = margin(0.5,0.5,0.5,0.5, "cm")) +
+  theme(axis.text.x = element_text(angle = 45))
+```
+

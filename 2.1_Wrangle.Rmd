@@ -19,6 +19,7 @@
     library(units)
     library(nngeo)
     library(magrittr)
+    library(mgcv)
     
     # data
     ## gpkg - ESPG 4283 (GDA94)
@@ -45,6 +46,7 @@
     sp_mod <- readRDS("./models/sp_mod.rda")
     
     source("./functions/genFunc.R") # function for smple weighting
+    source("./functions/spatialFunc.R") # function for smple weighting
     
      sf_use_s2(FALSE)
 ```
@@ -54,6 +56,10 @@
 ```{r}
 fuel %<>%
   mutate(TripMonth = gsub("[^a-zA-Z]", "", Month)) %>%
+  mutate(season = ifelse(TripMonth %in% c("Sep", "Oct"), "Spring", 
+                           ifelse(TripMonth %in% c("Jul", "Aug"), "Winter",
+                                  "Autumn"))) %>% 
+  mutate(season = as.factor(season)) %>% 
   mutate(numYear = as.numeric(paste0("20", as.numeric(gsub("[^0-9]", "", Month))))) %>%
   mutate(cost = Average/100)
 
@@ -156,7 +162,7 @@ rm( boat_perf, boat2L, boat3L, gam_cons, cons_mod, sp_mod, gam_sp)
       dat %<>%
         mutate(ann_inc = ifelse(!is.na(ann_inc_21), ann_inc_21, lm_ann_inc)) %>% 
         mutate(ann_inc = ifelse(is.na(ann_inc), mean(ann_inc, na.rm = T), ann_inc)) %>% 
-        mutate(vott = round(ann_inc/(38*52), 2))
+        mutate(vott = round((ann_inc/(38*52)/3), 2))
 
 
 rm(tmp, lm_ann_inc, vott)
@@ -183,66 +189,77 @@ All data filters have to be done before making the choice set.
 ```
 
 # Weighting
+Calculating sampling weights for strata: day type, school holiday, boat ramp
+# Weighting
 ```{r}
-    # for getting survey weights
+    # prep for getting survey weights
+    # will duplicate rows which are in public and school holiday - changing to school for weighting and removing duplicates
+    dat %<>% left_join(hol, by = c("SurveyDate" = "Date"))
+
+    tmp <- dat[which(duplicated(dat$TripID)), ] %>% dplyr::select(TripID)
+
+    dat %<>%  mutate(Holiday = ifelse(dat$TripID %in% tmp$TripID, "school", Holiday)) %>% distinct()
+    
     dat <- dat %>%
-      mutate(SurveyDate_posix = as.POSIXct(SurveyDate, format = "%m/%d/%Y %H:%M:%S") +
-               8*60*60) %>%
-      mutate(Time = format(SurveyDate_posix, "%p")) %>%
-      mutate(DayType = weekdays(SurveyDate_posix, abbreviate = TRUE)) %>%
+      mutate(DayType = weekdays(Date_posix, abbreviate = TRUE)) %>% 
       mutate(DayType = ifelse(DayType %in% c("Sat", "Sun"), "Weekend", "Weekday")) %>%
-      mutate(SurveyDate_posix = as.POSIXct(SurveyDate, format = "%m/%d/%Y")) %>%
-      mutate(Hol = ifelse(SurveyDate_posix %in% hol$Date, hol$Holiday, NA)) %>%
-      mutate(DayType = ifelse(Hol %in% "public", "Weekend", DayType)) %>%
-      mutate(Hol = ifelse(Hol %in% "school", 1, 0)) %>%
-      unite("psuid", c(SurveyDate_posix, Time), remove = F, sep = " ")
+      mutate(DayType = ifelse(Holiday %in% "public", "Weekend", DayType)) %>%
+      mutate(Holiday = as.factor(ifelse(Holiday %in% "school", "1", "0"))) %>%
+      unite("psuid", c(SurveyDate, Time, Site), remove = F, sep = " ")
 
+    # calculating nipw weights
+    ## site
+    w_site <- even_nipw(df = dat, psuid = psuid, w_col = "Site") 
+    dat %<>% left_join(w_site[, c("Site", "Site_nipw")])
     
-    # # calculating even weights
-    # dat <- even_weights(df = dat, psuid = psuid, w_col = "Time")
-    dat <- even_weights(df = dat, psuid = psuid, w_col = "Site")
-
-    # calculate uneven weights
+    # time
+    w_time <- even_nipw(df = dat, psuid = psuid, w_col = "Time") 
+    dat %<>% left_join(w_time[, c("Time", "Time_nipw")])
+      
+    ## holiday - not balanced
     # Holidays
-    nYr <- n_distinct(dat$numYear)
+    nhol <- hol %>% filter(Holiday == "school")  %>% nrow() # dates of school holidays in sample year
     
-    nhol <- hol %>% filter(Holiday == "school")  %>% nrow()
-    w_hol1 = nhol/(365*nYr)
-    w_hol0 = ((365*nYr) - nhol)/(365*nYr)
-
-    ## checkpoint: == 1
-    w_hol1 + w_hol0
-
-    # append
-    dat %<>% mutate(w_hol = ifelse(Hol %in% 1, w_hol1, w_hol0))
+    w_hol <- as.data.frame(table(dat$Holiday)) %>% 
+      mutate(target = ifelse(Var1 %in% 0, ((365*4) - nhol)/(365*4), nhol/(365*4))) %>% 
+      mutate(real = Freq/(sum(Freq))) %>% 
+      mutate(ipw = target/real) %>% 
+      mutate(hol_nipw = ipw/(sum(ipw))) %>% 
+      rename(Holiday = Var1)
+    
+    sum(w_hol$hol_nipw)  # checkpoint: == 1 
+    dat %<>% left_join(w_hol[, c("Holiday", "hol_nipw")]) # append
 
     # DayType
-    wdat <- dat %>% distinct(psuid, .keep_all = TRUE)
-    daytype_smpl <- as.data.frame(table(wdat$DayType)) %>%
-      mutate(w = ifelse(Var1 %in% "Weekend", Freq/(2*52), Freq/(5*52))) %>%
-      mutate(w_daytype = w/sum(w)) %>% # scaling
+    wdat <- dat %>% distinct(psuid, .keep_all = TRUE) # filtering to primary sampling units
+    
+    w_daytype <- as.data.frame(table(wdat$DayType)) %>%
+      mutate(target = ifelse(Var1 %in% "Weekend", (4*(2*52))/360, (4*(5*52))/360)) %>%
+      mutate(real = Freq/sum(Freq)) %>% 
+      mutate(ipw = target/real) %>% 
+      mutate(dt_nipw = ipw/sum(ipw)) %>% 
       rename(DayType = Var1)
-
-    ## checkpoint: == 1
-    sum(daytype_smpl$w_daytype)
-
-    # append
-    dat %<>% left_join(daytype_smpl[, c("DayType", "w_daytype")])
+    
+    sum(w_daytype$dt_nipw) # checkpoint: == 1
+    dat %<>% left_join(w_daytype[, c("DayType", "dt_nipw")])  # append
 
     # overall weight
-    dat %<>% mutate(smpl_w = w_Site*w_hol*w_daytype)
+    dat %<>% mutate(ipw = Site_nipw + hol_nipw + dt_nipw + Time_nipw) # w_time removed so same as south cpoast
     
-    rm(hol, wdat, daytype_smpl, w_hol0, w_hol1, nhol, nYr)
+    # dat %<>% mutate(nipw = ipw/sum(ipw))
+    # 
+    # sum(dat$nipw)
+    
+    rm(hol, w_site, w_time, w_daytype, w_hol, tmp, wdat)
 ```
-
 # Choice set
 ```{r choice set}
-# make a grid (no replications across boat ramps)
-sm_grid <- grid %>%
-  dplyr::select(gridid, grid_geom) %>%
-  distinct(gridid, .keep_all = TRUE)
+  # isolating grid ID to append to dat
+    gridID_vis <- grid %>%
+      dplyr::select(gridid, grid_geom) %>%
+      distinct()
 
-which(duplicated(sm_grid$gridid)) # should be none
+which(duplicated(gridID_vis$gridid)) # should be none
 
 # Writing choice set
 # choice <- sites %>% dplyr::select(gridID_alt, geom)
@@ -251,13 +268,14 @@ which(duplicated(sm_grid$gridid)) # should be none
 
 # Appending visited grids to data
 dat %<>% 
-  st_join(sm_grid, left = T, join = st_intersects) %>% 
-  rename(gridid_vis = gridid)
+  st_join(gridID_vis, left = T, join = st_intersects) %>% 
+  rename(gridID_vis = gridid)
 
 # Selecting data attributes
 dat %<>% 
   # rename(gridID_vis = gridID_alt) %>% 
-  dplyr::select(TripID, PersonID, gridid_vis, Site, TripDate, MedianTime, BoatLength, cost, smpl_w, Postcode, cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, KeptUndam, Dem, Dem_bin, Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, decDuration) %>% 
+  dplyr::select(TripID, PersonID, gridID_vis, Site, TripDate, MedianTime, BoatLength, cost, ipw, Postcode, cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, KeptUndam, CaughtUndam, Dem, Dem_bin,
+                Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, decDuration, FishingType) %>% 
   distinct() %>% 
   mutate(RampID = ifelse(Site %in% "BundegiBR", "73", NA),
          RampID = ifelse(Site %in% "CoralBayBR", "72", RampID),
@@ -278,7 +296,7 @@ dat %<>%
     
     #'[#VALIDATE: TRUE, number of sites * number of trips == nrow(dat), unless sites have been removed eg. beach launching sites]
     
-    t1*nrow(sm_grid) == nrow(dat)
+    t1*nrow(gridID_vis) == nrow(dat)
 ```
 
 
@@ -286,48 +304,106 @@ dat %<>%
 ```{r choice and travel cost}
 
       dat <- dat %>%
-        rename(gridid_alt = gridid) %>% 
+        rename(gridID_alt = gridid) %>% 
         # filter(!is.na(Postcode)) %>% 
-        mutate(choice = ifelse(gridid_vis == gridid_alt, 1, 0)) %>%
+        mutate(choice = ifelse(gridID_vis == gridID_alt, 1, 0)) %>%
         # mutate(land_fc = round(as.numeric((cost/(100/12))*accom_br), 2)*2) %>% 
         # mutate(water_fc = round(as.numeric((cost/consump)*km_BR), 2)*2) %>% #changing fuel&cost
         # mutate(lm_fc = round(as.numeric((cost/lm_cons)*km_BR), 2)*2) %>% 
-        mutate(l_ffc = round(as.numeric((cost/cons_flt)*l_km_br), 2)) %>% 
-        mutate(nl_ffc = round(as.numeric((cost/cons_flt)*nl_km_br), 2)) %>% 
-  
+        
+  # fuel cost
+        mutate(l_fc_flt = round(as.numeric((cost/cons_flt)*l_km_br), 2)) %>% 
+        mutate(nl_fc_flt = round(as.numeric((cost/cons_flt)*nl_km_br), 2)) %>% 
         mutate(l_fc2l = round(as.numeric((cost/cons2l)*l_km_br), 2)) %>% 
         mutate(nl_fc2l = round(as.numeric((cost/cons2l)*nl_km_br), 2)) %>% 
-  
         mutate(l_fc3l = round(as.numeric((cost/cons3l)*l_km_br), 2)) %>% 
-        mutate(nl_fc3l = round(as.numeric((cost/cons3l)*nl_km_br), 2)) %>% 
+        mutate(nl_fc3l = round(as.numeric((cost/cons3l)*nl_km_br), 2)) %>%
+        mutate(l_fc_gam = round(as.numeric((cost/gam_cons)*l_km_br), 2)) %>% 
+        mutate(nl_fc_gam = round(as.numeric((cost/gam_cons)*nl_km_br), 2)) %>%
   
+# travel time
+        mutate(l_trvlTime_flt = round(as.numeric(l_km_br/sp_flt, 2))) %>%
+        mutate(nl_trvlTime_flt = round(as.numeric(nl_km_br/sp_flt, 2))) %>%
         mutate(l_trvlTime2l = round(as.numeric(l_km_br/sp2l, 2))) %>%
         mutate(nl_trvlTime2l = round(as.numeric(nl_km_br/sp2l, 2))) %>%
-  
         mutate(l_trvlTime3l = round(as.numeric(l_km_br/sp3l), 2)) %>%
         mutate(nl_trvlTime3l = round(as.numeric(nl_km_br/sp3l), 2)) %>%
+        mutate(l_trvlTime_gam = round(as.numeric(l_km_br/gam_sp), 2)) %>%
+        mutate(nl_trvlTime_gam = round(as.numeric(nl_km_br/gam_sp), 2)) %>%
   
+  # trip VOTT
+        mutate(l_trp_vott_flt = round(as.numeric(vott*l_trvlTime_flt), 2)*2) %>%
+        mutate(nl_trp_vott_flt = round(as.numeric(vott*nl_trvlTime_flt), 2)*2) %>%
         mutate(l_trp_vott2l = round(as.numeric(vott*l_trvlTime2l), 2)*2) %>%
         mutate(nl_trp_vott2l = round(as.numeric(vott*nl_trvlTime2l), 2)*2) %>%
-  
         mutate(l_trp_vott3l = round(as.numeric(vott*l_trvlTime3l), 2)*2) %>%
         mutate(nl_trp_vott3l = round(as.numeric(vott*nl_trvlTime3l), 2)*2) %>%
+        mutate(l_trp_vott_gam = round(as.numeric(vott*l_trvlTime_gam), 2)*2) %>%
+        mutate(nl_trp_vott_gam = round(as.numeric(vott*nl_trvlTime_gam), 2)*2) %>%
   
+  # total cost
+        mutate(l_tc_flt = round(as.numeric(l_fc_flt + l_trp_vott_flt), 2)) %>% 
+        mutate(nl_tc_flt = round(as.numeric(nl_fc_flt + nl_trp_vott_flt), 2)) %>%
         mutate(l_tc2l = round(as.numeric(l_fc2l + l_trp_vott2l), 2)) %>% 
         mutate(nl_tc2l = round(as.numeric(nl_fc2l + nl_trp_vott2l), 2)) %>% 
-  
         mutate(l_tc3l = round(as.numeric(l_fc3l + l_trp_vott3l), 2)) %>% 
-        mutate(nl_tc3l = round(as.numeric(nl_fc3l + nl_trp_vott3l), 2))
-
-    dat <- dat %>% 
-      mutate(centroidLong = st_coordinates(centroid)[,1]) %>% # need this is using dynamic variables
-      mutate(centroidLat = st_coordinates(centroid)[,2])
+        mutate(nl_tc3l = round(as.numeric(nl_fc3l + nl_trp_vott3l), 2)) %>% 
+        mutate(l_tc_gam = round(as.numeric(l_fc_gam + l_trp_vott_gam), 2)) %>% 
+        mutate(nl_tc_gam = round(as.numeric(nl_fc_gam + nl_trp_vott_gam), 2)) %>% 
+  
+  # differential total cost (always flat fuel cost)
+        mutate(l_fcflt_sp2l = round(as.numeric(l_fc_flt + l_trp_vott2l), 2)) %>% 
+        mutate(nl_fcflt_sp2l = round(as.numeric(nl_fc_flt + nl_trp_vott2l), 2)) %>% 
+        mutate(l_fcflt_sp3l = round(as.numeric(l_fc_flt + l_trp_vott3l), 2)) %>% 
+        mutate(nl_fcflt_sp3l = round(as.numeric(nl_fc_flt + nl_trp_vott3l), 2)) %>% 
+        mutate(l_fcflt_spgam = round(as.numeric(l_fc_flt + l_trp_vott_gam), 2)) %>% 
+        mutate(nl_fcflt_spgam = round(as.numeric(nl_fc_flt + nl_trp_vott_gam), 2)) 
+        
+ #'[#VALIDATE: TRUE, should equal number of trips]
+    sum(dat$choice) == n_distinct(dat$TripID)
 ```
 
 # Transformations
 ```{r}
-    dat %<>% mutate(logarea = log(area + 1)) 
+    dat$arealog <- log(dat$area + 1)
+    dat$log_nl_km_br <- log(dat$nl_km_br + 1)
+    dat$log_l_km_br <- log(dat$l_km_br + 1)
+    dat$log_l_k <- log(dat$l_km_br + 1)
+    dat$l_fcflt_aninc <- dat$l_fc_flt * dat$ann_inc
+    dat$nl_fcflt_aninc <- dat$nl_fc_flt * dat$ann_inc
+    dat$bl_l_offdist <- dat$BoatLength * dat$log_l_km_br
+    dat$bl_nl_offdist <- dat$BoatLength * dat$log_nl_km_br
 ```
+
+
+## Swell
+```{r}
+    dat <- dat %>% 
+      mutate(centLong = st_coordinates(centroid)[,1]) %>% # need this is using dynamic variables
+      mutate(centLat = st_coordinates(centroid)[,2])
+
+  #extracting swell
+   hsws <- get_hs_ws_day(dat$TripDate, dat$centLong, dat$centLat) # getting hs and ws
+
+   # making a numeric hour column
+  dat$MedianHour <- as.numeric(gsub("\\:.*$", "", dat$MedianTime))
+
+  # catagorising time of day
+  dat$TimeOfDay <- with(dat,  ifelse(MedianHour >= 5 & MedianHour <= 10, "Morning",
+                            ifelse(MedianHour >= 11 & MedianHour <= 13, "Midday",
+                                   ifelse(MedianHour >= 14 & MedianHour <= 18, "Afternoon", NA))))
+
+  # appending swell and wind speed
+  hsws_df <- as.data.frame(hsws)
+
+  dat <- dat %>%
+    mutate(swell = ifelse(TimeOfDay %in% "Morning", hsws$hs_morning,
+                                ifelse(TimeOfDay %in% "Midday", hsws$hs_midday, hsws$hs_afternoon))) %>%
+    mutate(wind = ifelse(TimeOfDay %in% "Morning", hsws$wspeed_morning,
+                                ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
+                                       hsws$wspeed_afternoon)))
+```
+
 
 # Save output
 ```{r save}

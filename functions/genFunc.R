@@ -24,27 +24,25 @@ hhmm2dec <- function(x) {
 # w_col: the column to be weighted
 # Call example: dat <- even_weights(df = dat, psuid = Shifts, w_col = "Time")
 
-even_weights <- function(df, psuid, w_col) {
+even_nipw <- function(df, psuid, w_col) {
   
   d <- distinct(df, {{psuid}}, .keep_all = TRUE)
   
+  # differnt method not sure if its right
   freq_tbl <- as.data.frame(table(d[[w_col]])) %>%
-    mutate(w = Freq/sum(Freq)) %>%
+    #   mutate(ipw = 1/Freq) %>% # inverse probability weight
+    #   mutate(nipw = ipw/sum(ipw)) %>%  # normalized inverse probability weight
+    mutate(target = 1/nrow(.)) %>% # target probability
+    mutate(real = Freq/sum(Freq)) %>% # real probability
+    mutate(ipw = target/real) %>% # inverse probability weight
+    mutate(nipw = ipw/sum(ipw)) %>% # inverse probability weight
     rename({{w_col}} := Var1)
   
-  # return(freq_tbl)
-  # stop()
+  sum_nipw <- sum(freq_tbl$nipw)
+  print(paste("Sum of nipw equals:", sum_nipw))
   
-  if (sum(freq_tbl$w) != 1) {
-    
-    stop("Sum of weights does not equal 1")
-    
-  } else {
-    
-    df %<>% left_join(freq_tbl[, c({{w_col}}, "w")])
-    colnames(df)[ncol(df)] <- paste0("w_", w_col)
-    
-  }
+  colnames(freq_tbl)[ncol(freq_tbl)] <- paste0(w_col, "_nipw")
   
-  return(df)
+  return(freq_tbl)
+  
 }

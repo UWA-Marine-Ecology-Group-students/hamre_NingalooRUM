@@ -17,7 +17,8 @@
 * read data 
 
 	clear
-	import delimited "data/02_data/2.1_dat.csv"
+// 	import delimited "data/02_data/2.3_dat_base.csv" 
+	import delimited "data/02_data/2.2_dat_base.csv" 
 	
 **# data prep 
 
@@ -25,6 +26,7 @@
 
 	gen fisl_adj = isl_adj == 1
 	gen fchoice = choice == 1
+	gen logkm = log(nl_km_br + 1)
 
 * changing strings to numeric
 
@@ -32,21 +34,20 @@
 
 * transformations
 
-	* gen depthsquared = depth*depth
-	gen arealog = log(area+1)
+	* gen depthsquared = depth*depth	
 	
+**# MODEL FOR BIOECONOMIC MODEL
+//  clogit choice c.l_ffc c.logarea c.pfit_dem, group(tripid)
+// 	estimates store mod2
+//	
+// 	estimates stats mod1 mod2
 
-**# base model
-	
-	clogit choice c.tc3l c.depth arealog km_mainland fisl_adj, group(tripid)
+**# ATTRIBUTE MODEL FOR ASC VS ATT PAPER
+
+	clogit choice c.nl_tc3l c.logarea c.logkm c.swell fisl_adj, group(tripid)
 	estimates store mod1
 	
-// 	clogit choice c.tc2l c.depth arealog km_mainland fisl_adj, group(tripid)
-// 	estimates store mod2
-	
-	estimates stats mod1 mod2
-	
-	* 3 boat size levels is better
+	estimates stats mod1
 	
 	
 	

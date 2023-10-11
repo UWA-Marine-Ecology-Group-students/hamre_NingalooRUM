@@ -1,5 +1,7 @@
 # Set Up
 ```{r setup, include = FALSE}
+  rm(list = ls())
+
 # librarys
 library(tidyverse)
 library(dplyr)
@@ -153,10 +155,18 @@ Recall: Binary variable, where 1 = recall and 0 = not recall
 ```{r Dates}
 # append Jons date data - different formats
 dat <- dat %>%
-  dplyr::mutate(SurveyDate = as.Date(as.POSIXct(ifelse(is.na(nDate), CreationDate.x, nDate), origin = '1970-01-01', tz = "Australia/Perth"))) %>% 
-  dplyr:::mutate(jDate = as.Date(jDate, "%d/%m/%Y")) %>% 
-  dplyr::mutate(SurveyDate = as.Date(ifelse(!is.na(SurveyDate), as.character(as.Date(SurveyDate, "%Y-%m-%d")), as.character(as.Date(jDate, "%Y-%m-%d"))), "%Y-%m-%d")) %>% 
-  dplyr::filter(!is.na(SurveyDate)) %>% 
+  mutate(Date_posix = as.POSIXct(ifelse(is.na(nDate), CreationDate.x, nDate), 
+                                 origin = '1970-01-01', tz = "Australia/Perth") + 8*60*60) %>% 
+  mutate(nDate_posix = as.POSIXct(nDate, origin = '1970-01-01', tz = "Australia/Perth") + 8*60*60) %>% 
+  mutate(Date_posix = ifelse(is.na(nDate_posix), CreationDate.x, nDate)) %>% 
+  mutate(jTime = ifelse(is.na(jTime) & !is.na(jDate), "14:00", jTime)) %>% 
+  mutate(jDate_posix = paste(jDate, jTime, sep = (" "))) %>% 
+  mutate(jDate_posix = as.POSIXct(jDate_posix, format = "%d/%m/%Y %H:%M",origin = '1970-01-01', tz = "Australia/Perth")) %>% 
+  mutate(Date_posix = as.POSIXct(ifelse(is.na(Date_posix), as.POSIXct(jDate_posix), as.POSIXct(Date_posix)), 
+                                 origin = '1970-01-01', tz = "Australia/Perth")) %>% 
+  filter(!is.na(Date_posix)) %>% 
+  mutate(Time = format(Date_posix, "%p")) %>% 
+  mutate(SurveyDate = as.Date(Date_posix)) %>% 
    mutate(exRecall = as.Date(parse_date_time(exRecall, c("mdY IMS p")), tz = "Australia/Perth")) %>%
   mutate(nexRecall = as.Date(parse_date_time(nexRecall, c("mdY IMS p")), tz = "Australia/Perth")) %>% 
   mutate(TripDate = as.Date(ifelse(!is.na(exRecall), as.character(as.Date(exRecall, "%Y-%m-%d")),
@@ -927,17 +937,20 @@ dat <- dat %>%
   dplyr::mutate(UseLat = ifelse(FishingType_other %in% "Coral trout fly island ", -21.8093, UseLat)) %>%
   dplyr::mutate(UseLong = ifelse(FishingType_other %in% "Coral trout fly island ", 114.5551, UseLong)) %>% 
   
+  mutate(FishingType = str_trim(FishingType)) %>% 
+  
   dplyr::mutate(FishingType_other = ifelse(str_detect(FishingType_other, "^Both bait lure $|^Both lure and bait $|^Both bait or Kur $|^Bith$|^Both bait and lure$|^Both $|^Bait dropping$|^Going for squid$|^Always come back with a feed, fishing from boat on average 25 times a year $|^Occasional spearing and casting$|^Occasional line and squidding, but not recently $|^Also squidding, each weekend here or at town beach$|^Trolled on the way back$|^Trawling and spearing$|^For. Arlin$|^Electric reel$|^Squiring, trolling$|^Marlin fishing$|^Travelers 6nm trolling to this point$|^Caught one cod w the lure but we’re just squidding$|^Off jetty$|^Only just put hooks in -arrived yesterday so no other activities$|^From boat ramp$|^80 m$|^Coral trout fly island $|^Casting elswhere, halfway back$|^All of the above except spearing|^And casting$|^And bottom bashing$|^And squidding$|^Trolled from marina to 1st site$|^Comments...annoying that people don’t listen to advice and then complain. $|^And whale watching$"), NA, FishingType_other)) %>% 
   
   dplyr::mutate(FishingType = ifelse(FishingType_other %in% c("Lidat ","Casting", "Casting w rods", "Line", "Fly fishing"), "Casting", FishingType)) %>%
   dplyr::mutate(FishingType = ifelse(FishingType_other %in% "Prawdat", "Prawdat", FishingType)) %>%
-  dplyr::mutate(FishingType = ifelse(FishingType_other %in% c("Drift","Bottom bashin","Drifting", "Bottom bashing and trolling", "Did some trawling on the way to sight; then bottom bashing", "Squidding and bottom bashing", "Bottom bashing", "Bottom fishing", "Drifted with sea anchor"), "Demersal", FishingType)) %>%
+  dplyr::mutate(FishingType = ifelse(FishingType_other %in% c("Drift","Bottom bashin","Drifting", "Bottom bashing and trolling", "Did some trawling on the way to sight; then bottom bashing", "Squidding and bottom bashing", "Bottom bashing", "Bottom fishing", "Drifted with sea anchor"), "Demersal", FishingType)) %>% 
+
   dplyr::mutate(FishingType = ifelse(FishingType_other %in% c("Marlin trawling","Sports and game fishing", "Sports fishing", "Trawling", "Trolling"), "Trolling", FishingType)) %>%
   dplyr::mutate(FishingType = ifelse(FishingType_other %in% c("Squidding", "Jigging, stick baiting", "Squiding", "Trolling, squid"), "Squidding", FishingType)) %>% 
   dplyr::mutate(FishingType = ifelse(FishingType_other %in% c("Free diving; spearing", "Free dive", "Spearing", "Free Diving for crays ", "Spearing "), "Spearing", FishingType)) %>% 
   dplyr::mutate(FishingType = ifelse(numYear < "2020", jFishingType, FishingType)) %>%
   dplyr::mutate(FishingType = ifelse(FishingType =="Other", "Trolling", FishingType)) %>%
-  dplyr::mutate(FishingType = ifelse(FishingType %in% c("Demersal ","Demersal","Bottom-bashing (drifting)","Bottom-bashing (anchored)"), "Demersal", FishingType)) %>%
+  dplyr::mutate(FishingType = ifelse(jFishingType %in% c("Demersal","Demersal","Bottom-bashing (drifting)","Bottom-bashing (anchored)"), "Demersal", FishingType)) %>%
   dplyr::mutate(FishingType = ifelse(BoatAccess %in% "No", "Casting", FishingType)) %>% 
   dplyr::mutate(FishingType = ifelse(is.na(FishingType) & is.na(exRecall) &is.na(nexRecall) & Site %in% c("BundegiBeach", "LearmonthJetty"), "Casting", FishingType))
 ```
@@ -1017,6 +1030,7 @@ dat <- dat %>%
   dplyr::mutate(KeptUndam = ifelse(!is.na(KeptUndam_other), KeptUndam_other, KeptUndam)) %>%
   
   dplyr::mutate(KeptUndam = ifelse(numYear > 2016 & is.na(KeptUndam) & ActivityType %in% c("Extractive", "Both"), "0", KeptUndam)) %>% 
+  dplyr::mutate(KeptUndam = ifelse(numYear < 2017, CaughtUndam, KeptUndam)) %>% 
   dplyr::mutate(KeptUndam = as.numeric(KeptUndam)) 
 ```
 
@@ -1057,7 +1071,7 @@ dat <- dat %>%
   dplyr::mutate(CaughtUndam = as.numeric(CaughtUndam))
 ```
 
-### Total number of fish hooked (undamaged and depredated)
+### Total number of fish hooked (undamaged and depredated)s
 ```{r nHooked}
  dat <- dat %>%
   dplyr::mutate(nHooked = as.numeric(ifelse(numYear > 2016, CaughtUndam + nDP, nHooked)))
@@ -1269,6 +1283,7 @@ dat <- dat %>%
   mutate(exTimes12m = ifelse(str_detect(exTimes12m, "^.*[a-zA-Z]|[-].*$"), NA, exTimes12m)) %>% 
   mutate(exTimes12m = ifelse(numYear < 2018, jDaysBoatFished, exTimes12m)) %>% 
   mutate(exTimes12m = gsub("[>]", "", exTimes12m)) %>% 
+  mutate(exTimes12m = ifelse(exTimes12m %in% "50100", "75", exTimes12m)) %>% 
   mutate(exTimes12m = as.numeric(exTimes12m)) %>% 
   mutate(bin_exTimes12m = ifelse(between(exTimes12m, 0, 4), "0-4", bin_exTimes12m)) %>% 
   mutate(bin_exTimes12m = ifelse(between(exTimes12m, 5, 9), "5-9", bin_exTimes12m)) %>%
@@ -1489,7 +1504,7 @@ dat <- dat %>%
 ```{r}
 dat <- dat %>% 
   dplyr::select(
-    ID, TripID, SurveyDate, numYear, facYear, Interviewer, mLat, mLong, PersonID, Screen18,
+    ID, TripID, SurveyDate, Date_posix, Time, numYear, facYear, Interviewer, mLat, mLong, PersonID, Screen18,
          PrevInter, Agreement, binRecall, TripDate, TripMonth, TripJulianDay, TripNum, SiteNum,
          Site, SiteType, Resident, BoatAccess, nDaysInArea, nBoatDays, nShoreDays, nTimesLast12m,
          UseLat, UseLong, ActivityType, Activity, Start, Start_hr, Stop, MedianTime, decMedianTime,

@@ -121,12 +121,15 @@ dat %<>%
 ```{r save}
 # save a dynamic vars frame to be joined on later if you need
 dyn_cov <- dat %>% dplyr::select(gridid_alt, TripID, sst, swell, wind)
-write_csv(dyn_cov, "./data/02_data/2.2_dyn_cov.csv")
+# write_csv(dyn_cov, "./data/02_data/2.2_dyn_cov_base.csv")
+# write_csv(dyn_cov, "./data/02_data/2.2_dyn_cov_sim.csv")
 
 # save with geoms
-saveRDS(dat, "./data/02_data/2.2_dat.gpkg")
+# saveRDS(dat, "./data/02_data/2.2_dat_base.gpkg")
+# saveRDS(dat, "./data/02_data/2.2_dat_sim.gpkg")
 
 # data frame with no geom for stata
 dat_df <- dat %>%  st_drop_geometry %>% as.data.frame()
-write.csv(dat, "./data/02_data/2.2_dat.csv")
+# write.csv(dat, "./data/02_data/2.2_dat_base.csv")
+# write.csv(dat, "./data/02_data/2.2_dat_sim.csv")
 ```

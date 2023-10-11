@@ -22,20 +22,21 @@ library(sf)
 library(readxl)
 
 # data
-# dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # this is the generalised data with static site attributes
-# # dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # this is the generalised data with static site attributes
-# BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by the "TripAllocation.R" script (Matt)
-dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")
+# attmod_base: CHARLOTTE
+# attmod: acs vs att fine scale attribute model
 
-# Plotting
-# mp <- st_read("./data/gpkg/pmmp_4326.gpkg")
-# # mp_bbox <- st_read("./data/gpkg/pscmpBbox_4326.gpkg")
-# NPZ <- st_read("./data/gpkg/ntz_4283.gpkg")
+# dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # No catch rate
+# dat <- read_csv("./data/02_data/2.2_dat_base.csv") # CHARLOTTE
+dat <- read_csv("./data/02_data/2.3_dat_att.csv") # ATTRIBUTE
+BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by the "TripAllocation.R" script (Matt)
 
-grid <- dat %>% as.data.frame() %>%
-  distinct(gridID_alt, .keep_all = TRUE) %>%
-  dplyr::select(gridID_alt, geometry) %>%
-  st_as_sf()
+b <- read_excel("./data/03_data/attmod.xlsx") %>% dplyr::select(Vars, Coef) # coeficients 
+a <- nrow(b) + 2
+v <- read_excel("./data/03_data/attmod.xlsx", sheet = "v", col_names = rep("x", a)) %>% # covariance covarience matrix
+  dplyr::select(-x...1 ) %>%
+  distinct()
+
+
 ```
 
 Model Data
@@ -43,11 +44,12 @@ Multiple model
 b: Data with coefficients from model using trip data
 v: covariance matrix
 ```{r}
-# base model
-b <- read_excel("./data/03_data/attmod_base.xlsx") %>% dplyr::select(Vars, Coef)
+# attmod_base: ChARLOTTE
+# attmod: acs vs att fine scale attribute model
+b <- read_excel("./data/03_data/attmod.xlsx") %>% dplyr::select(Vars, Coef)
 
 a <- nrow(b) + 2
-v <- read_excel("./data/03_data/attmod_base.xlsx", sheet = "v", col_names = rep("x", a)) %>%
+v <- read_excel("./data/03_data/attmod.xlsx", sheet = "v", col_names = rep("x", a)) %>%
   dplyr::select(-x...1 ) %>%
   distinct()
 ```
@@ -70,7 +72,8 @@ Need to transform data in choice ste to match transformations used in model
 ```{r transformations, include = FALSE}
 dat <- dat %>%
   # mutate(depthsquared = Depth*Depth) %>%
-   mutate(arealog = log(as.numeric(area) + 1))
+   mutate(logkm = log(as.numeric(nl_km_br) + 1)) %>% 
+  rename(fisl_adj = isl_adj)
 ```
 
 # Error 
@@ -95,9 +98,9 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
 
 ```{r utility, include = FALSE}
 
-  bid <- unique(b$Vars) 
-  id_vars <- dat %>% dplyr::select(matches(bid))
-  vars <- c(names(id_vars), "isl_adj") #TODO automate
+  # bid <- unique(b$Vars) 
+  # id_vars <- dat %>% dplyr::select(matches(bid))
+  # vars <- c(names(id_vars), "isl_adj") #TODO automate
       
     # turn defined vars into matrix from dat, make sure there is no geometry
         rum_matrix <- as.matrix(dat[, vars])
@@ -140,8 +143,8 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     # Vj[Vj$ID %in% npz$gridID_alt, cols] <- 0 # remove for 5 km grid
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] 
     p <- p[order(br, ID)]
-    dat %<>% arrange(Site, gridID_alt)
-    table(dat$gridID_alt == p$ID) # this should all be true (they do now)
+    dat %<>% arrange(Site, gridid_alt)
+    table(dat$gridid_alt == p$ID) # this should all be true (they do now)
     
     # alternatives presented to the person - sum of exp(Vj)
      logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]
@@ -172,8 +175,8 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 # ntz <- c(sim$gridID_alt)
 
 # 1km grid
-sim <- st_read("./data/gpkg/Sim 1.gpkg")
-ntz <- sim$gridID_alt
+# sim <- st_read("./data/gpkg/Sim 1.gpkg")
+# ntz <- sim$gridID_alt
 
 # Calculate probability of visit and logsums: post-simulation
     

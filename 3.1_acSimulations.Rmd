@@ -1,5 +1,6 @@
 # Setup
 ```{r setup, include = FALSE}
+  rm(list = ls())
 
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, cache = TRUE, fig.align = 'center', fig.width = 10, fig.height = 7) 
 
@@ -21,16 +22,21 @@ library(sf)
 
 # data
 # BRtrips <- readRDS("./data/gpkg/BRtrips_KR_4283.gpkg") # Korinna Ryans BR estimates
-# BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
+BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
 
 # simulation 
+model <- "asc_attatasc" #'[#NOTE: choose model] 
 sim <- "sim1" #'[#NOTE: choose simulation] 
+cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
 
-b <- read_excel(paste0("./data/03_data/asc_", sim, ".xlsx")) # coef
+b <- read_excel(paste0("./data/03_data/", model, ".xlsx")) # coef
 a <- nrow(b) + 2
-v <- read_excel(paste0("./data/03_data/asc_", sim, ".xlsx"), sheet = "v", col_names = rep("x", a)) %>%   distinct() # covariance cases
+v <- read_excel(paste0("./data/03_data/", model, ".xlsx"), sheet = "v", col_names = rep("x", a)) %>% distinct() # covariance cases
 
-dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim ,"_4283.gpkg"))
+# dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim ,"_4283.gpkg")) # for when no data is models eg. catch rate
+dat <- read_csv(paste0("./data/02_data/2.3_asc_dat_", sim, ".csv")) # for when  data is models eg. catch rate
+# dat <- read_csv("./data/02_data/2.3_dat_att.csv") # attribute
+
 
 # plotting data
 # mp <- st_read("./data/gpkg/pmmp_4326.gpkg")
@@ -38,7 +44,7 @@ dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim ,"_4283.gpkg"))
 # NPZ <- st_read("./data/gpkg/ntz_4283.gpkg")
 
 # source
-source("./functions/theme.R")
+# source("./functions/theme.R")
 ```
 
 # Wrangle data
@@ -50,22 +56,25 @@ source("./functions/theme.R")
     #'[#VALIDATE: TRUE, check dat has correct number of rows]
     nrow(dat) == n_distinct(dat$gridID_alt) * n_distinct(dat$TripID)
 
-    grid <- dat %>% as.data.frame() %>%
-        distinct(gridID_alt, .keep_all = TRUE) %>% # nrow(grid) == number of available options
-        dplyr::select(gridID_alt, asc_geom) %>%
-        st_as_sf()
+    # grid <- dat %>% as.data.frame() %>%
+    #     distinct(gridID_alt, .keep_all = TRUE) %>% # nrow(grid) == number of available options
+    #     dplyr::select(gridID_alt, asc_geom) %>%
+    #     st_as_sf()
     
-    b %<>% rename(gridid_alt = ...1) %>% 
-      mutate(gridid_alt = ifelse(Vars %in% "travelcost", "tc", gridid_alt)) %>% 
+    b %<>% rename(cov = ...1) %>% 
+      # mutate(gridid_alt = ifelse(Vars %in% "travelcost", "tc", gridid_alt)) %>% 
+      mutate(cov = ifelse(!(Vars %in% "_cons"), Vars, cov)) %>% 
       dplyr::select(-Vars)
   
-    v %<>% mutate(x...1 = ifelse(x...2 %in% "travelcost", "tc", x...1)) %>%  
+    v %<>% 
+      # mutate(x...1 = ifelse(x...2 %in% "travelcost", "tc", x...1)) %>%  
+      mutate(x...1 = ifelse(!(x...2 %in% "_cons"), x...2, x...1)) %>%  
       dplyr::select(-x...2) %>% 
       distinct()
   
     colnames(v) <- c("vars", v$x...1)
     v %<>% dplyr::select(-vars)
-    vars <- b$gridid_alt #use
+    vars <- b$cov #use
 
     #'[#VALIDATE: TRUE/TRUE/check min and max, extreme values will skew model (issue 2.1?)]
     nrow(b) == length(v) # should be true
@@ -95,20 +104,24 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
 # calculate utility
       
       # define vars used in RUM
-      bid <- unique(b$gridid_alt) 
-      id_vars <- dat %>% dplyr::select(num_range("gridID_", bid))
-      vars <- c("travelCost", names(id_vars)) 
+      bid <- unique(b$cov) 
+      id_vars <- dat %>% dplyr::select(num_range("gridID_", bid)) # extract grid IDs
+      
+      bsite <- bid[str_detect(bid, "[a-zA-Z]")] 
+      site_vars <- dat %>% dplyr::select(contains(bsite)) # extract attributes
+      
+      vars <- c(names(site_vars), names(id_vars)) #'[#NOTE: add factor vars]
       
     # turn defined vars into matrix from dat, make sure there is no geometry
-        rum_matrix <- as.matrix(dat[, vars])
-        
+      rum_matrix <- as.matrix(dat[, vars])
+      
     # create an empty utility matrix
         Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) 
         
     # calculate observed utility for every alternative (nrows), n1 times from
     # multivariate random normal distribution. %*% is a matrix multiplication where...
     # We are multiplying the values in the rum_matrix (real data) by the error  
-    # coefficients matrix (mvn_b)? so we have 100 utility values for each variable- why? 
+    # coefficients matrix (mvn_b)? so we have 100 utility values for each variable - why? 
     
         for (i in 1:n1) { 
           Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
@@ -119,6 +132,8 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
         #'[#VALIDATE: TRUE, exp(Vj) should make all values positive]
        identical(which( Vj < 0), integer(0))
        which(is.infinite(as.matrix(Vj)))
+       
+    
 ```
 
 The probability of a recreator (i) choosing site (j) is the exponential of the the utility of the site (j) divided by the sum of the utility of all the potential alternatives the recreator could have choosen (including site j). This is a conditional logit formula. 
@@ -132,7 +147,7 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     cols <- colnames(Vj) # save the names of the draws for later
     Vj$br <- as.integer(dat$RampID) # run function by BR
     Vj$ID <- as.integer(dat$gridID_alt) # add gridID_alt for group_by
-    Vj$tc <- dat$travelCost # add travel cost
+    Vj$tc <- dat$nl_fcflt_spgam # add travel cost
 
     # Calculate probability of visit and logsums: pre-simulation
     f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)}
@@ -238,58 +253,41 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
   # write.csv(dat, "./ignore/03_data/3.1_Wsimdat.csv")
   # write.csv(logsum_sim, "./ignore/03_data/3.1_logsum_sim.csv")
 ```
-# Annual welfare impacts per boat ramp
+## Annual Impact
 
-## Annual BR visits
-This chunk sums monthly br visits and gravity functions to get annual estimates and joins to rum data. 
-  
-```{r brtrip data prep, include = FALSE}
-# checking brs match
-    setdiff(BRtrips$RampID, dat$RampID)
-    setdiff(dat$RampID, BRtrips$RampID)
+This chunk merges estimates of trip numbers at each ramp each annually (BRtrips) with estimates of the probability of visiting each grid (by annually) given a particular boat ramp was selected (dat). 
 
-# joining trip data to dat
-    # RUM <- dat %>% left_join(.,BRtrips, by = "RampID", suffix = c("", "_Ramp"))
-```
+-   Number of annual trips per br \* the W impact of each br
 
-## Multipling welfare impacts across annual br visits
+Multiplied br numbers by corresponding probabilities. Note that because we adjusted the probs above to sqrt(0.025) we should now have accurate 95% CIs. 
 
-This chunk merges estimates of trip numbers at each ramp each annually (BRtrips) with estimates of
-the probability of visiting each grid (by annually) given a particular boat ramp was selected (dat). 
+```{r br multiplication gravity, include = FALSE}
 
-  - Number of annual trips per br * the W impact of each br
-  
-```{r br multiplication, include = FALSE}
+dat %<>% left_join(.,BRtrips, by = "RampID", suffix = c("", "_Ramp"))
+
     RUM_W <- dat %>% distinct(.,RampID, .keep_all = TRUE) %>%
+      # gravity function
       mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*w.mean, .names = "welf_mean_{.col}" ),
              across(starts_with("upp_TRIPS"), ~.x*w.upp, .names = "welf_upp_{.col}" ),
-             across(starts_with("low_TRIPS"), ~.x*w.low, .names = "welf_low_{.col}" ))
+             across(starts_with("low_TRIPS"), ~.x*w.low, .names = "welf_low_{.col}" )) 
+      # dprid
+      # mutate(across("dprid_br_mean", ~.x*w.mean, .names = "welf_mean_{.col}" ),
+      #        across("dprid_br_uci", ~.x*w.upp, .names = "welf_upp_{.col}" ),
+      #        across("dprid_br_lci", ~.x*w.low, .names = "welf_low_{.col}" ))
 
-# check match BR in shp file
-    setdiff(RUM_W$RampID, BRtrips$RampID)
-    setdiff(BRtrips$RampID, RUM_W$RampID)
+# Annual Impact
+    grav_impact <- RUM_W %>% summarise(round(across(starts_with(c("welf_low_low", "welf_mean_TRIPS","welf_upp_upp")), sum)))
+ 
+    # dprid_impact <- RUM_W %>% summarise(round(across(starts_with(c("welf_low_dprid", "welf_mean_dprid","welf_upp_dprid")), sum)))
     
-# join to shp file
-    # RUM_W %<>% left_join(BR[,c("RampID")], by = c("BR" = "RampID"), suffix = c("","_ramp"))
+    # w_impact <- as.data.frame(cbind(grav_impact, dprid_impact)) %>% 
+    #   pivot_longer(cols = 1:6) %>% 
+    #   rename(value = name,
+    #          ann_impact = value)
+  
+   grav_impact
     
-# multiplied br numbers by corresponding probabilities. Note that because we adjusted the probs above to 
-# sqrt(0.025) we should now have accurate 95% CIs. 
-    
-    dat %<>% 
-      mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*p.mean_sim, .names = "mean_sim_{.col}" ),
-                             across(starts_with("TRIPS_ramp_prop"), ~.x*p.mean_base, .names =
-                                      "mean_base_{.col}"),
-                             across(starts_with("upp_TRIPS"), ~.x*p.upp_sim, .names = "upp_sim_{.col}" ),
-                             across(starts_with("upp_TRIPS"), ~.x*p.upp_base, .names = "upp_base_{.col}" ),
-                             across(starts_with("low_TRIPS"), ~.x*p.low_sim, .names = "low_sim_{.col}" ),
-                             across(starts_with("low_TRIPS"), ~.x*p.low_base, .names = "low_base_{.col}" ))
-
-# Sum by grid (over ramps) to get use at grid level
-      RUM_grid <- dat %>% group_by(gridID_alt) %>%  # was just grouping by ID
-      summarise(across(starts_with(c("mean_sim_","upp_sim_","low_sim_","mean_base_", "upp_base_", 
-                                     "low_base_")), sum))
-# join it to geometry
-    RUM_grid <- right_join(grid, RUM_grid, by = c("gridID_alt"))
+    # write_csv(w_impact, paste0("./data/03_data/3.1_ann_impact_", sim,".csv"))
 ```
 
 # Welfare impacts
