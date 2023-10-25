@@ -42,18 +42,23 @@ full_dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim_name,"_4283.gp
   mutate(lagoon = ifelse(is.na(lagoon), 0, lagoon)) 
 
 # Data to model
-dat <- full_dat %>% filter(choice == 1 & FishingType %in% "Demersal")
-# dat <- full_dat %>% filter(choice == 1 & FishingType %in% "Demersal" & Site %in% c("TantabiddiBR", "CoralBayBR"))
+# dat <- full_dat %>% filter(choice == 1 & FishingType %in% "Demersal")
+dat <- full_dat %>% filter(choice == 1 & FishingType %in% "Demersal" )
+                           # # & Site %in% c("TantabiddiBR", "CoralBayBR"))
+                           # & Site %in% c("BundegiBR", "ExmouthBR") 
+                           # & facYear %in% c("2015", "2016"))
 ```
 
 # FSSgam
 ## Response
 ```{r}
-# dat <- dat %>% # Jon doesn't have number of fish kept, just caught undamaged
-#   mutate(CaughtUndam = as.integer(CaughtUndam)) %>%
-#   mutate(caught_bin = ifelse(CaughtUndam > 0, 1, 0)) # potentially to test
+dat <- dat %>% # Jon doesn't have number of fish kept, just caught undamaged
+  mutate(CaughtUndam = as.integer(CaughtUndam)) %>%
+  mutate(caught_bin = ifelse(CaughtUndam > 0, 1, 0)) # potentially to test
 
-resp <- dat$Dem 
+resp <- dat$caught_bin
+# resp <- dat$Dem_bin 
+# dat$Dem_bin <- as.factor(dat$Dem_bin)
 
 which(is.na(dat$resp))
 zeros <- round(nrow(dat[which(resp == 0),])/nrow(dat)*100, 2)
@@ -64,7 +69,7 @@ ggplot() +
   annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
   theme_classic()
 
-dat %<>% filter(Dem < 16)
+# dat %<>% filter(Dem < 16)
 ```
 
 ## Vars to test
@@ -76,8 +81,8 @@ pred.vars <- c("depth", "km_BR", "reefs", "lagoon", "decDuration", "rug", "Media
 
 
 # factor vars 
-# factor.vars <- c("season", "BaitLure") # east/west model
-factor.vars <- c("season", "BaitLure", "gulf")
+factor.vars <- c("season", "BaitLure") # east/west model
+# factor.vars <- c("season", "BaitLure", "gulf")
 dat %<>% mutate(across(all_of(c(factor.vars)), as.factor))
 
 # rum.vars
@@ -92,7 +97,7 @@ There needs to be no NAs in the predictors in the full data set the model can pr
 summary(full_dat[,pred.vars]) 
 pred.vars <- pred.vars[ !pred.vars == "exTimes12m"] # remove 
 
-full_dat
+# full_dat
 
 # check factors vars
 names(which(colSums(is.na(dat[,factor.vars]))>0)) 
@@ -158,11 +163,13 @@ Aiming for homoscedascit, normal distribution, however avoid transformation wher
 
   # Make transformations
   # ASC
-  dat$log_depth <- log(dat$depth + 1)
+  # dat$log_depth <- log(dat$depth + 1)
+  # dat$PersonID <- as.factor(dat$PersonID)
   
   
-  full_dat$log_depth <- log(full_dat$depth + 1)
-
+  # full_dat$log_depth <- log(full_dat$depth + 1)
+  # full_dat$PersonID <- as.factor(full_dat$PersonID)
+  
   # Attribute
   # dat$log_depth <- log(dat$depth + 1)
   # dat$log_reef <- log(dat$reef + 1)
@@ -181,7 +188,7 @@ Aiming for homoscedascit, normal distribution, however avoid transformation wher
 ```{r}
   # update continous predictors
 # pred.vars <- c("log_depth","log_nlkm_br","pelagic", "log_reef", "log_rreef", "log_lagoon", "sqrt_decDuration", "sqrt_rug", "centroidLat") # CHARLOTTE
-pred.vars <- c("log_depth", "reefs", "lagoon", "rug", "MedianHour", "centLat") # ASC
+pred.vars <- c("depth", "reefs", "lagoon", "rug", "MedianHour", "centLat") # ASC
 # pred.vars <- c("log_depth","log_nl_km_br", "log_reef", "log_rreef", "log_lagoon", "sqrt_rug", "centLat", "log_avid", "MedianHour") # Attribute
 ```
 
@@ -199,7 +206,7 @@ top.all = list()
 
 # test model
 # test_fit <- gam(Dem ~ s(log_depth, k = 3, bs = "cr") + s(PersonID, bs = 're'), family = tw(), data = dat) # CHARLOTTE
-test_fit <- gam(Dem ~ s(log_depth, k = 3, bs = "cr") + s(PersonID, bs = 're') + s(facYear, bs = 're'), 
+test_fit <- gam(KeptUndam ~ s(depth, k = 3, bs = "cr") + s(facYear, bs = 're'), 
                 offset = decDuration, family = tw(), data = dat) # PhD
 
 # model selection
@@ -209,7 +216,7 @@ model.set <- generate.model.set(use.dat = dat,
                                 pred.vars.fact = factor.vars,
                                 max.predictors = 5,
                                 k = 3,
-                                null.terms = "s(PersonID, bs = 're') + s(facYear, bs = 're')",
+                                null.terms = "s(facYear, bs = 're')",
                                 smooth.smooth.interactions = F,
                                 factor.factor.interactions = F,
                                 cov.cutoff =  T)
@@ -265,13 +272,15 @@ all.var.imp %<>%
   mod.table[1, "formula"]
   
 # Make top model
-topmod <- gam(Dem ~ 
+topmod <- gam(caught_bin ~ 
               # ASC
-              s(centLat, k = 3, bs = "cr") +
-              s(MedianHour, by = gulf, k = 3, bs = "cr") +
-              s(rug, by = gulf, k = 3, bs = "cr") +
+              # s(centLat, k = 3, bs = "cr") +
+              s(MedianHour, by = season, k = 3, bs = "cr") +
+              s(rug, k = 3, bs = "cr") +
               s(lagoon, k = 3, bs = "cr") +
-              gulf + 
+              s(reefs, k = 3, bs = "cr") +
+              # s(rug, by = season, k = 3, bs = "cr") +
+              season +
                 
               # ATRRIBUTE 
               # s(log_depth, k = 3, bs = "cr") +
@@ -280,11 +289,11 @@ topmod <- gam(Dem ~
               # s(log_reef, by = season, k = 3, bs = "cr") +
               # season +
                 
-              s(PersonID, bs = 're') +
+              # s(PersonID, bs = 're') +
               s(facYear, bs = 're'),
               offset = decDuration,
               method = "REML",
-              family = tw(), 
+              family = binomial(),
               data = dat)
 
 # saveRDS(topmod, file = "./models/catch.rda")
@@ -296,7 +305,7 @@ AIC(topmod)
 par(mfrow = c(2,2)) 
 gam.check(topmod)
 
-par(mfrow = c(3,4)) 
+par(mfrow = c(2,3)) 
 plot(topmod, all.terms = TRUE, residuals = TRUE, pch = 16, shade = TRUE)
 ```
 
@@ -306,7 +315,8 @@ full_dat %<>% dplyr::select(-c(p_dem.fit, p_dem.se.fit))
 
 # Predict model onto big data
 full_dat <- cbind(full_dat,
-                "p_dem" = predict(topmod, newdata = full_dat, type = 'response', se.fit = T))
+                "p_dem" = predict(topmod, newdata = full_dat, se.fit = T))
+                # "p_dem" = predict(topmod, newdata = full_dat, type = 'response', se.fit = T))
 
 full_dat %<>%
   mutate(p_dem.fit = round(p_dem.fit), p_dem.se.fit = round(p_dem.se.fit, 2))
@@ -320,6 +330,14 @@ ggplot() +
   ylab("Frequency") +
   annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
   theme_classic()
+# 
+# a <- full_dat %>% filter(p_dem.fit > 69)
+# a[, c("TripID","gridID_alt","Dem", "p_dem.fit", "centLat", "MedianHour", "lagoon", "log_depth", "facYear")] 
+# 
+# summary(a$p_dem.fit)
+# table(a$p_dem.fit)
+# 
+# a[which(a$p_dem.fit %in% c(19, 27)), ]
 ```
 
 ## Spatial Predictions
@@ -331,12 +349,26 @@ ggplot() +
 # 1275
 #72
 
+east <- full_dat %>%  filter(Site %in% c("BundegibR", "ExmouthBR")) %>% filter(TripID == 880)
+
+trips <- c(2, 880, 1136, 1353)
+
 grid <- full_dat %>% 
-  filter(TripID == 992) %>%
+  filter(TripID == 880) %>%
   st_as_sf()
 
+bigcatch <- grid %>% filter(gridID_alt %in% unique(a$gridID_alt))
+
+points <- full_dat %>% filter(Site %in% c("TantabiddiBR", "CoralBayBR")) %>% distinct(TripID, dat_geom)
+
+ggplot()+
+  geom_sf(data = grid$asc_geom, lwd = 0.05)+
+  geom_sf(data = bigcatch$asc_geom, fill = "blue") +
+  geom_sf(data = points$dat_geom, size = 0.25) +
+  theme_classic()
+
 ggplot() +
-  geom_sf(data = grid$asc_geom, aes(fill = grid$p_dem.fit), lwd = 0.05) +
+  geom_sf(data = grid$asc_geom, aes(fill = as.factor(grid$p_dem.fit)), lwd = 0.05) +
   # scale_fill_distiller(palette = "YlGnBu", direction = 1) +
   labs(fill = "Demersal\nCatch") +
   theme_classic()
@@ -346,6 +378,21 @@ ggplot() +
   scale_fill_distiller(palette = "YlGnBu", direction = -1) +
   labs(fill = "Error: Demersal\nCatch") +
   theme_classic()
+
+a <- full_dat[which(full_dat$p_dem.fit > 10), ]
+a
+
+dat %>% group_by(gridID_alt) %>% 
+  summarise(av = mean(CaughtUndam > 0))
+  # summarise(av = mean()) %>% 
+ggplot() +
+  geom_sf(data = dat$asc_geom, aes(fill = as.factor(dat$av)), lwd = 0.05) +
+  # scale_fill_distiller(palette = "YlGnBu", direction = 1) +
+  labs(fill = "Demersal\nCatch") +
+  theme_classic()
+
+
+
 ```
 # Store
 Need a data set with no geometry for stata
