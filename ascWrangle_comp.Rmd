@@ -330,6 +330,7 @@ bch <- st_snap(bch, coast) # snap to coast
   
   ggplot() +
     geom_sf(data = coast) +
-  geom_sf(data = bch)
+    geom_sf(data = sh_base, aes(colour = zone), lwd = ) +
+  geom_sf(data = bch, size = 0.5)
 ```
 
