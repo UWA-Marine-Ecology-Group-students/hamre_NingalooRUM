@@ -36,7 +36,7 @@ Comprehensive RUM of recreational activities ta Ningaloo
     grid_base <- st_read("./data/gpkg/ascBase_v2.gpkg") %>% 
       st_transform(crs = 4283)
     
-  sh_base <- st_read("./data/gpkg/shline_ascBase.gpkg") %>% 
+  sh_base <- st_read("./data/gpkg/asc_shbase.gpkg") %>% 
       st_transform(crs = 4283)
     
     dat <- read_csv("data/01_data/1.2_dat.csv")
@@ -309,6 +309,13 @@ All data filters have to be done before making the choice set.
 ```{r}
  dat <- st_crop(dat, grid_base) # removing outliers 
 
+coast <- st_transform(coast, crs = st_crs(bch))
+bch <- dat %>% filter(Activity %in% "Beachgoing") # filter to beach going
+
+bch <- st_snap(bch, coast) # snap to coast
+
+
+
 # asc grid
     grid <- ASCgrid(poly = sh_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03,
                     by = 0.02, crs = 4283, vert = FALSE) 
@@ -319,5 +326,10 @@ All data filters have to be done before making the choice set.
   
   ggplot() +
   geom_sf(data = grid, aes(fill = area))
+  
+  
+  ggplot() +
+    geom_sf(data = coast) +
+  geom_sf(data = bch)
 ```
 
