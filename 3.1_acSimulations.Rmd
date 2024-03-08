@@ -26,7 +26,7 @@ BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrip
 
 # simulation 
 model <- "asc_attatasc" #'[#NOTE: choose model] 
-sim <- "sim1" #'[#NOTE: choose simulation] 
+sim <- "sim3" #'[#NOTE: choose simulation] 
 cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
 
 b <- read_excel(paste0("./data/03_data/", model, ".xlsx")) # coef
@@ -102,12 +102,16 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
 
 ```{r utility, include = FALSE}
 # calculate utility
-      
+# add f_ from binary vars 
+
+dat %<>% rename(f_pred_catch_bin_fit = pred_catch_bin_fit)
+
       # define vars used in RUM
       bid <- unique(b$cov) 
-      id_vars <- dat %>% dplyr::select(num_range("gridID_", bid)) # extract grid IDs
+      id_vars <- dat %>% dplyr::select(num_range("gridid_", bid)) # extract grid IDs
       
       bsite <- bid[str_detect(bid, "[a-zA-Z]")] 
+      # bsite <- c("fcflt_spgam", "p_dem.fit", "swell", "arealog") # temp manual to add factor
       site_vars <- dat %>% dplyr::select(contains(bsite)) # extract attributes
       
       vars <- c(names(site_vars), names(id_vars)) #'[#NOTE: add factor vars]
@@ -123,6 +127,7 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
     # We are multiplying the values in the rum_matrix (real data) by the error  
     # coefficients matrix (mvn_b)? so we have 100 utility values for each variable - why? 
     
+      # the code below often fails: non-confromable. This means that you need to check the names in the vectors above to make sure the are the same as the model and mach the data set in teh rught order
         for (i in 1:n1) { 
           Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
         }
@@ -145,8 +150,8 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 
     Vj <- as.data.table(Vj) # make data.table to save RAM
     cols <- colnames(Vj) # save the names of the draws for later
-    Vj$br <- as.integer(dat$RampID) # run function by BR
-    Vj$ID <- as.integer(dat$gridID_alt) # add gridID_alt for group_by
+    Vj$br <- as.integer(dat$rampid) # run function by BR
+    Vj$ID <- as.integer(dat$gridid_alt) # add gridID_alt for group_by
     Vj$tc <- dat$nl_fcflt_spgam # add travel cost
 
     # Calculate probability of visit and logsums: pre-simulation
@@ -154,10 +159,10 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # applying probability function to every cell in Vj by boat ramp
     p <- p[order(br, ID)] # ordering
-    dat %<>% arrange(RampID, gridID_alt) # ordering
+    dat %<>% arrange(rampid, gridid_alt) # ordering
     
     #'[#VALIDATE: TRUE, should be the same so you can append probabilities]
-    table(dat$gridID_alt == p$ID)
+    table(dat$gridid_alt == p$ID)
     
     nrow(dat) == nrow(p) 
     
@@ -168,7 +173,7 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     #'[#VALIDATE: TRUE, sum(p(each site from br)) == 1, so sum(p(each site from every         boat ramp)) == #boat ramps]
     
     sum(p[,1])
-    n_distinct(dat$RampID)
+    n_distinct(dat$rampid)
 
     # Adds probability statistics (lower ci, median, upper ci) to each row of dat. This is the probability that people will visit site (gridID_alt) pre-simulation. 
     # Summary stats are calculated across each row in p (rowQuantiles), length == n1
@@ -181,7 +186,7 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
      logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]
     
      sum(dat$choice) # should be ntrips
-    n_distinct(dat$PersonID) # why is there only 4 trips 
+    n_distinct(dat$personid) # why is there only 4 trips 
 
     # save output
     # write.csv(dat, "./ignore/03_data/3.1_basedat.csv")
@@ -193,18 +198,18 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 ```{r closures, include = FALSE}
 # Assign closures
   sz_vars <- dat %>% 
-    dplyr::select(gridID_alt, sz) %>% 
+    dplyr::select(gridid_alt, sz) %>% 
     filter(sz == 1) %>% 
-    distinct(gridID_alt)
+    distinct(gridid_alt)
   
-   ntz <- unique(sz_vars$gridID_alt) 
+   ntz <- unique(sz_vars$gridid_alt) 
 
 # Calculate probability of visit and logsums: post-simulation
     Vj[Vj$ID %in% ntz, cols] <- 0
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")]
     p <- p[order(br, ID)]
-    dat %<>% arrange(RampID, gridID_alt)
-    table(dat$gridID_alt == p$ID) # should all be true
+    dat %<>% arrange(rampid, gridid_alt)
+    table(dat$gridid_alt == p$ID) # should all be true
     
     logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols] # 18876 trips
     
@@ -233,9 +238,9 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     logsum_sim$w.upp <- rowQuantiles(W, probs = 1 - sqrt(0.025)) # upper ci
     # logsum_sim$upp.ci <- logsum_sim$w.upp - logsum_sim$w.mean
     
-    dat %<>%  mutate(RampID = as.integer(RampID))
+    dat %<>%  mutate(rampid = as.integer(rampid))
   
-    dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("RampID" = "br"))
+    dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("rampid" = "br"))
 
     # # Welfare impact of closure
     W_impact_trip <- logsum_sim %>%
@@ -263,13 +268,13 @@ Multiplied br numbers by corresponding probabilities. Note that because we adjus
 
 ```{r br multiplication gravity, include = FALSE}
 
-dat %<>% left_join(.,BRtrips, by = "RampID", suffix = c("", "_Ramp"))
+dat %<>% left_join(.,BRtrips, by = c("rampid" = "RampID"), suffix = c("", "_ramp"))
 
-    RUM_W <- dat %>% distinct(.,RampID, .keep_all = TRUE) %>%
+    RUM_W <- dat %>% distinct(.,rampid, .keep_all = TRUE) %>%
       # gravity function
       mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*w.mean, .names = "welf_mean_{.col}" ),
              across(starts_with("upp_TRIPS"), ~.x*w.upp, .names = "welf_upp_{.col}" ),
-             across(starts_with("low_TRIPS"), ~.x*w.low, .names = "welf_low_{.col}" )) 
+             across(starts_with("low_TRIPS"), ~.x*w.low, .names = "welf_low_{.col}" ))
       # dprid
       # mutate(across("dprid_br_mean", ~.x*w.mean, .names = "welf_mean_{.col}" ),
       #        across("dprid_br_uci", ~.x*w.upp, .names = "welf_upp_{.col}" ),

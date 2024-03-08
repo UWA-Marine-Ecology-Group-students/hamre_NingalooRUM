@@ -33,7 +33,7 @@ This script creates a grid with associated attributes from a ASC RUM.
     npz <- st_read("./data/gpkg/ntz.gpkg") %>% 
       st_transform(crs = 4283)
     
-    grid_base <- st_read("./data/gpkg/ascBase_v2.gpkg") %>% 
+    grid_base <- st_read("./data/gpkg/sims/ascBase_v3.gpkg") %>% 
       st_transform(crs = 4283)
     
     dat <- read_csv("data/01_data/1.2_dat.csv")
@@ -56,14 +56,20 @@ This script creates a grid with associated attributes from a ASC RUM.
     
     vott <- read.csv("./data/RAW/VOTT.csv")
     
-    habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
-      st_transform(crs = 4283) %>% 
-      st_make_valid() %>% 
-      mutate(habitat = tolower(habitat))
+    # habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
+    #   st_transform(crs = 4283) %>% 
+    #   st_make_valid() %>% 
+    #   mutate(habitat = tolower(habitat))
     
-    gulf <- st_read("./data/gpkg/exgulf.gpkg") %>% 
-      st_transform(crs = 4283)
-    
+    # gulf <- st_read("./data/gpkg/exgulf.gpkg") %>% 
+    #   st_transform(crs = 4283)
+    # 
+    #  tant <- st_read("./data/gpkg/launch_areas.gpkg") %>% 
+    #   st_transform(crs = 4283)
+      # 
+      #     CB <- st_read("./data/gpkg/CB_launch.gpkg") %>% 
+      # st_transform(crs = 4283)
+      # 
     # get fuel csv from here
     # https://www.fuelwatch.wa.gov.au/retail/monthly
     # need to resave as proper csv format
@@ -76,9 +82,12 @@ This script creates a grid with associated attributes from a ASC RUM.
     bl_mod <- readRDS("./models/bl_mod.rda")
     
     # simulation
-    sim_name <- "sim1"       #'[#NOTE: check simulation name]  
+    sim_name <- "sim3"       #'[#NOTE: check simulation name]
+    # 
+    # sim <- st_read(paste0("./data/gpkg/sims/asc_", sim_name, ".gpkg")) %>% 
+    #   st_transform(crs = 4283)
     
-    sim <- st_read(paste0("./data/gpkg/sims/asc_", sim_name, ".gpkg")) %>% 
+    sim <- st_read(paste0("./data/gpkg/ning_sim+sz.gpkg")) %>% 
       st_transform(crs = 4283)
     
     # functions
@@ -88,6 +97,11 @@ This script creates a grid with associated attributes from a ASC RUM.
     source("./functions/genFunc.R") # function for smple weighting
     
     sf_use_s2(FALSE)
+    
+    ggplot()+
+      geom_sf(data = grid_base) +
+      geom_sf(data = sim, fill = "green") +
+       geom_sf(data = npz, fill = "blue")
 ```
 
 # Joining external data
@@ -203,10 +217,15 @@ rm(fuel, boat2L, boat3L, vott, temp, gam_cons, sp_cons, cons_mod, sp_mod, tmp, b
 All data filters have to be done before making the choice set.
 ```{r}
     dat %<>% 
-      filter(ActivityType == "Extractive") %>% # filtering activity
-      filter(str_detect(Site, "BR")) %>% 
-      filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
-      st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)  ## make sf object
+        filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
+      st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283)  %>% ## make sf object
+      mutate(dem_only = ifelse(Dem_bin == 1 & Pel_bin == 0 & nrSh_bin == 0 & Mol_bin == 0 &
+                                 Crust_bin == 0, 1, 0)) %>% 
+
+      # filter(ActivityType == "Extractive") %>% # filtering activity
+      filter(FishingType %in% c("Demersal", "Casting")) %>% # fishing RUM
+      filter(SiteType %in% "Boat") %>% # filtering activity
+      filter(str_detect(Site, "BR"))
       
     # need one trip per row (longest site visited on trip)
     dat %<>% 
@@ -221,81 +240,89 @@ All data filters have to be done before making the choice set.
 ```
 
 # Weighting
+Following protocol outed in KAP
+
+## Step 5.1: Identify starta to be weighted
+  - boat ramp (no others necessary because on intensive field trip)
+  
+The primary sampling unit (psuid) is a shift am/pm at a specific boat ramp on a specific date where at least one survey was conducted
 ```{r}
-    # prep for getting survey weights
-    # will duplicate rows which are in public and school holiday - changing to school for weighting and removing duplicates
-    dat %<>% left_join(hol, by = c("SurveyDate" = "Date"))
+## Prepping data 
+tot_smpl <- nrow(dat) # total samples
 
-    tmp <- dat[which(duplicated(dat$TripID)), ] %>% dplyr::select(TripID)
+# Append frequency of each starta to data set
+br_freq <- table(dat$Site) %>% as.data.frame() %>% rename(br_freq = Freq)
 
-    dat %<>%  mutate(Holiday = ifelse(dat$TripID %in% tmp$TripID, "school", Holiday)) %>% distinct()
-    
-    dat <- dat %>%
-      mutate(DayType = weekdays(Date_posix, abbreviate = TRUE)) %>% 
-      mutate(DayType = ifelse(DayType %in% c("Sat", "Sun"), "Weekend", "Weekday")) %>%
-      mutate(DayType = ifelse(Holiday %in% "public", "Weekend", DayType)) %>%
-      mutate(Holiday = as.factor(ifelse(Holiday %in% "school", "1", "0"))) %>%
-      unite("psuid", c(SurveyDate, Time, Site), remove = F, sep = " ")
+dat %<>% left_join(br_freq, by = c("Site" = "Var1"))
+```
 
-    # calculating nipw weights
-    ## site
-    w_site <- even_nipw(df = dat, psuid = psuid, w_col = "Site") 
-    dat %<>% left_join(w_site[, c("Site", "Site_nipw")])
-    
-    # time
-    w_time <- even_nipw(df = dat, psuid = psuid, w_col = "Time") 
-    dat %<>% left_join(w_time[, c("Time", "Time_nipw")])
-      
-    ## holiday - not balanced
-    # Holidays
-    nhol <- hol %>% filter(Holiday == "school")  %>% nrow() # dates of school holidays in sample year
-    
-    w_hol <- as.data.frame(table(dat$Holiday)) %>% 
-      mutate(target = ifelse(Var1 %in% 0, ((365*4) - nhol)/(365*4), nhol/(365*4))) %>% 
-      mutate(real = Freq/(sum(Freq))) %>% 
-      mutate(ipw = target/real) %>% 
-      mutate(hol_nipw = ipw/(sum(ipw))) %>% 
-      rename(Holiday = Var1)
-    
-    sum(w_hol$hol_nipw)  # checkpoint: == 1 
-    dat %<>% left_join(w_hol[, c("Holiday", "hol_nipw")]) # append
+## Step 5.2: Calculate inclusion probability
+```{r}
+# Step 5.2a: calulate inclusion probability
+dat %<>%
+  mutate(br_inprob = br_freq/tot_smpl)
+```
 
-    # DayType
-    wdat <- dat %>% distinct(psuid, .keep_all = TRUE) # filtering to primary sampling units
-    
-    w_daytype <- as.data.frame(table(wdat$DayType)) %>%
-      mutate(target = ifelse(Var1 %in% "Weekend", (4*(2*52))/360, (4*(5*52))/360)) %>%
-      mutate(real = Freq/sum(Freq)) %>% 
-      mutate(ipw = target/real) %>% 
-      mutate(dt_nipw = ipw/sum(ipw)) %>% 
-      rename(DayType = Var1)
-    
-    sum(w_daytype$dt_nipw) # checkpoint: == 1
-    dat %<>% left_join(w_daytype[, c("DayType", "dt_nipw")])  # append
-
-    # overall weight
-    dat %<>% mutate(ipw = Site_nipw + hol_nipw + dt_nipw + Time_nipw) # w_time removed so same as south cpoast
-    
-    # dat %<>% mutate(nipw = ipw/sum(ipw))
-    # 
-    # sum(dat$nipw)
+## Step 5.3: Calculate IPW
+```{r}
+dat %<>% mutate(ipw = 1/br_inprob)
 ```
 
 # ASC grid
 
 Creates smallest ASC grid possible within the base grid, given the distribution of data. Each cell must have at least 1 data point in it. 
 Calculates basic stats for simulation and current marine park (eg. area, beach access etc.)
-```{r message = FALSE}
-# asc grid
-    grid <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03,
-                    by = 0.02, crs = 4283, vert = FALSE) 
 
-#'[#NOTE:Check empty grids before removing]  
-  emp <- grid[which(grid$data_present == FALSE),]
-  grid %<>% filter(gridID_alt != emp$gridID_alt) 
-  
-  ggplot() +
-  geom_sf(data = grid, aes(fill = area))
+Need the current sz to make the grid which doesnt intersect wit zones, but these are later removed because the have no recreational fishing value (if doing extractive rums only).
+```{r message = FALSE}
+# # asc grid
+#     grid <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = dat, from = 0.03,
+#                     by = 0.02, crs = 4283, vert = FALSE)
+# 
+# # Proposed needs manual edits: merge small port areas, removed tiny little polygons around islands  - idetified through centroid plot in next chunk - chek to make sure none lok out of place
+# #
+#     grid %<>% st_transform(crs = 4283)
+#     st_write(grid,
+#              paste0("./data/gpkg/sims/2.1_asc_manual_edit_", sim_name, "_4283.gpkg"),
+#              append = FALSE) # need to write with st_write to open in QGISRUMs
+
+    grid <- st_read(paste0("./data/gpkg/sims/2.1_qgis_asc_dem_manual_edit.gpkg")) %>%
+      st_transform(crs = 4283) %>% 
+  st_make_valid()
+  #
+    # making grid columns
+    grid %<>% dplyr::select(-contains("gridID_"))
+
+    grid %<>% mutate(gridID_alt = row_number())
+
+    for (i in unique(grid$gridID_alt)) {
+    gridID = ifelse(grid$gridID_alt == i, 1, 0)
+    grid[,length(grid) + 1] <- gridID
+    colnames(grid)[ncol(grid)] <- paste0("gridID_", i)
+  }
+
+    # needs redone after manual manipulation
+    grid$area <- as.numeric(round(set_units(st_area(grid), km^2), 2))
+    grid$use_count <- lengths(st_intersects(grid, dat))
+
+  #'[#NOTE:Check empty grids before removing]  
+  # Remove current sz and cells with no data presnet
+    grid %<>% filter(sz_current == 0 & use_count != 0)
+
+  # plot should have no zeros and check data to make sure
+    ggplot() +
+      geom_sf(data = grid, aes(fill = as.factor(use_count))) +
+      geom_sf(data = dat, size = 0.5)
+    
+    # if there are any points outwith grid probs in sz - check before removing
+    
+    #nrow(dat): 543
+    dat %<>% mutate(to_rm = ifelse(st_intersects(dat, grid), 1, 0)) %>% 
+      filter(!is.na(to_rm))
+    
+    ggplot() +
+      geom_sf(data = grid, aes(fill = as.factor(sz)))+
+      geom_sf(data = dat, size = 0.5)
 ```
 
 # Grid attributes
@@ -319,7 +346,7 @@ hab_grid <- hab %>%
   ungroup() %>%
   st_drop_geometry()
 
-hab_grid[2:4] <- hab_grid[2:4] - 1 # dont know why function above is summing and adding 1
+hab_grid[2:4] <- hab_grid[2:4] - 1 # dont know why function above is summing and adding 1 so no zeros exist. 
 
 #'[#VALIDATE: there should be one row for every individual grid ID]
 
@@ -339,14 +366,16 @@ ggplot()+
 ggplot()+
   geom_sf(data = grid, aes(fill = rreef), lwd = 0.05)
 ggplot()+
-  geom_sf(data = grid, aes(fill = reefs), lwd = 0.05)
+  geom_sf(data = grid, aes(fill = reef), lwd = 0.05)
 
-grid %<>% mutate(reefs = rreef + reef) # sum reefs into one
-
-#ADD IN chnage NA to 0
+grid %<>% 
+  mutate(reefs = rreef + reef) %>%  # sum reefs into one
+  mutate(reefs = ifelse(is.na(reefs), 0, reefs)) %>% 
+  mutate(lagoon = ifelse(is.na(lagoon), 0, lagoon))
 ```
 
 ## Dist from BR
+ascAtt creates ascG_geom
 ```{r}
 # st_geometry(grid) <- "geom"
 
@@ -416,8 +445,19 @@ ggplot() +
 grid %<>% 
   mutate(gulf = ifelse(as.list(st_intersects(grid, gulf)) %in% "integer(0)", 0, 1))
 
+grid %<>% 
+  mutate(tant = ifelse(as.list(st_intersects(grid, tant)) %in% "integer(0)", NA, "T"))
+
+grid %<>% 
+  mutate(CB = ifelse(as.list(st_intersects(grid, CB)) %in% "integer(0)", NA, "CB"))
+
+grid %<>%
+  mutate(launch = ifelse(tant %in% "T", "T", NA)) %>% 
+  mutate(launch = ifelse(CB %in% "CB", "CB", launch)) %>% 
+  mutate(launch = ifelse(is.na(launch), "G", launch))
+
 ggplot() +
-  geom_sf(data = grid, aes(fill = as.factor(gulf)), lwd = 0.05) + theme_classic()
+  geom_sf(data = grid, aes(fill = as.factor(launch)), lwd = 0.05) + theme_classic()
 ```
 
 ## Append data
@@ -431,33 +471,36 @@ ggplot() +
     dat  %<>% 
       st_join(gridID_vis, left = T, join = st_intersects) 
     
-     # check there are no missing gridID_vis
-    a <- dat[which(is.na(dat$gridID_alt)), ]
-    a
-    ggplot() +
-      geom_sf(data = grid) +
-      geom_sf(data = a)
+     #### check there are no missing gridID_vis
+    which(is.na(dat$gridID_alt))
+    # a <- dat[which(is.na(dat$gridID_alt)), ]
+    # a
+    # ggplot() +
+    #   geom_sf(data = grid) +
+    #   geom_sf(data = a)
     
     # fill missing gridID_vis with nearest adjacent if applicable
-    tmp <- dat %>% filter(is.na(dat$gridID_alt)) %>% dplyr::select(TripID)
+    # tmp <- dat %>% filter(is.na(dat$gridID_alt)) %>% dplyr::select(TripID)
     
-    tmp %<>% st_join(gridID_vis, join = st_nearest_feature)
+    # tmp %<>% st_join(gridID_vis, join = st_nearest_feature)
+    
+    
     # check filling in the missing gridID vis has worked
-    g <- grid %>% filter(gridID_alt == tmp$gridID_alt)
+    # g <- grid %>% filter(gridID_alt == tmp$gridID_alt)
      
-    ggplot() +
-      geom_sf(data = grid) +
-      geom_sf(data = g, fill = 'red')+
-      geom_sf(data = a)
+    # ggplot() +
+    #   geom_sf(data = grid) +
+    #   geom_sf(data = g, fill = 'red')+
+    #   geom_sf(data = a)
     
     # append missing gridIDs
-    tmp %<>% st_drop_geometry()
-    
-   dat %<>% 
-     left_join(tmp, by = c("TripID")) %>% 
-     mutate(gridID_alt.x = ifelse(is.na(gridID_alt.x), gridID_alt.y, gridID_alt.x)) %>% 
-     rename(gridID_alt = gridID_alt.x) %>% 
-     dplyr::select(-gridID_alt.y)
+   #  tmp %<>% st_drop_geometry()
+   #  
+   # dat %<>% 
+   #   left_join(tmp, by = c("TripID")) %>% 
+   #   mutate(gridID_alt.x = ifelse(is.na(gridID_alt.x), gridID_alt.y, gridID_alt.x)) %>% 
+   #   rename(gridID_alt = gridID_alt.x) %>% 
+   #   dplyr::select(-gridID_alt.y)
     
     # selecting attributes, and tidying
     dat %<>%
@@ -466,7 +509,7 @@ ggplot() +
       #'Mandatory vars: TripID, PersonID, gridID_vis, Site, BoatLength  
       dplyr::select(TripID, PersonID, gridID_vis, Site, TripDate, MedianTime, BoatLength, cost, ipw, Postcode, 
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, VOTT, ann_inc, 
-                    KeptUndam, CaughtUndam,Dem, Dem_bin, Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, 
+                    KeptUndam, CaughtUndam,Dem, Dem_bin, dem_only, Start_hr, BaitLure, Age, exTimes12m, TripMonth, numYear, 
                     decDuration, FishingType) %>%
       distinct() %>%
       mutate(RampID = ifelse(Site %in% "ExmouthBR", 85, NA),
@@ -565,10 +608,10 @@ Distance from the boat ramp to the centroid of data points in each grid that lau
 dat %<>%
     mutate(centLong = st_coordinates(centroid)[,1]) %>%
     mutate(centLat = st_coordinates(centroid)[,2])
-
-  #extracting swell
+# 
+#   #extracting swell
    hsws <- get_hs_ws_day(dat$TripDate, dat$centLong, dat$centLat) # getting hs and ws
-
+# 
    # making a numeric hour column
   dat$MedianHour <- as.numeric(gsub("\\:.*$", "", dat$MedianTime))
 
@@ -576,8 +619,8 @@ dat %<>%
   dat$TimeOfDay <- with(dat,  ifelse(MedianHour >= 5 & MedianHour <= 10, "Morning",
                             ifelse(MedianHour >= 11 & MedianHour <= 13, "Midday",
                                    ifelse(MedianHour >= 14 & MedianHour <= 18, "Afternoon", NA))))
-
-  # appending swell and wind speed
+# 
+#   # appending swell and wind speed
   hsws_df <- as.data.frame(hsws)
 
   dat <- dat %>%
@@ -642,20 +685,18 @@ dat %<>%
   - Current sz will have no data and therefore no value so are removed
   - Simulated sz that have no data have no value so are  removed
 ```{r}
-    # Remove sites with no recreational value
-    dat <- dat %>%  filter(sz_value == 1 | is.na(sz_value))
-    
-    # remove observations that have visited the current sz (removed above)
-    sz_current_w_use <- setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
-    
-    dat2 <- dat %<>% filter(!(gridID_vis %in% sz_current_w_use))
+    # # Remove sites with no recreational value
+    # dat <- dat %>%  filter(sz_value == 1 | is.na(sz_value))
+    # 
+    # # remove observations that have visited the current sz (removed above)
+    # sz_current_w_use <- setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
+    # 
+    # dat2 <- dat %<>% filter(!(gridID_vis %in% sz_current_w_use))
     
     #'[#VALIDATE: TRUE, no difference between gridID_alt/vis as every cells needs data]
   
      setdiff(unique(dat$gridID_vis), unique(dat$gridID_alt))
      setdiff(unique(dat$gridID_alt), unique(dat$gridID_vis))
-     
-    
      
     # removing sz columns
     sz_to_remove <- dat %>% 

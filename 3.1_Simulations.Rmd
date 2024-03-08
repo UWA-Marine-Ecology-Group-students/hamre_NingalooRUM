@@ -22,40 +22,29 @@ library(sf)
 library(readxl)
 
 # data
-# attmod_base: CHARLOTTE
+# attmod_base: CHARLOTTE 
 # attmod: acs vs att fine scale attribute model
 
 # dat <- readRDS("./data/gpkg/2.1_ChoiceSet_4283.gpkg")  # No catch rate
 # dat <- read_csv("./data/02_data/2.2_dat_base.csv") # CHARLOTTE
 dat <- read_csv("./data/02_data/2.3_dat_att.csv") # ATTRIBUTE
 BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by the "TripAllocation.R" script (Matt)
-
+ntz <- st_read("./data/gpkg/wha_ntz_grid.gpkg") %>% st_make_valid() %>% distinct(gridid) # this is a shape file of the hexs within the current sanctuary zones
+  
 b <- read_excel("./data/03_data/attmod.xlsx") %>% dplyr::select(Vars, Coef) # coeficients 
 a <- nrow(b) + 2
-v <- read_excel("./data/03_data/attmod.xlsx", sheet = "v", col_names = rep("x", a)) %>% # covariance covarience matrix
+v <- read_excel("./data/03_data/attmod.xlsx", sheet = "v", col_names = rep("x", a)) %>% # covariance matrix
   dplyr::select(-x...1 ) %>%
   distinct()
 
-
+# Spatial data 
+grid <- readRDS("./data/gpkg/2.0_Sites_4283.gpkg")
+mp_bbox <- st_read("./data/gpkg/StudySite_4283.gpkg")
 ```
 
-Model Data
-Multiple model
-b: Data with coefficients from model using trip data
-v: covariance matrix
-```{r}
-# attmod_base: ChARLOTTE
-# attmod: acs vs att fine scale attribute model
-b <- read_excel("./data/03_data/attmod.xlsx") %>% dplyr::select(Vars, Coef)
-
-a <- nrow(b) + 2
-v <- read_excel("./data/03_data/attmod.xlsx", sheet = "v", col_names = rep("x", a)) %>%
-  dplyr::select(-x...1 ) %>%
-  distinct()
-```
-# Rearrange data
-Aim is to have matrix with same row names and column names
+# Data prep
 ```{r rearrange, include = FALSE}
+# The row names of v need to become the col names
     colnames(v) <- c("vars", v$x...2)
     v %<>% dplyr::select(-vars)
     vars <- b$Vars #use
@@ -65,52 +54,50 @@ length(v) == nrow(v) # should be true
 
 # write.csv(b, "./data/03_data/bioec_coefs.csv")
 # write.csv(v, "./data/03_data/bioec_covmat.csv")
-```
 
-# Transformation
-Need to transform data in choice ste to match transformations used in model
-```{r transformations, include = FALSE}
+# data needs to be transformed/renames to match vars in model run in stata
+
 dat <- dat %>%
   # mutate(depthsquared = Depth*Depth) %>%
-   mutate(logkm = log(as.numeric(nl_km_br) + 1)) %>% 
-  rename(fisl_adj = isl_adj)
+   mutate(logkm = log(as.numeric(nl_km_br) + 1)) %>%
+  rename(fisl_adj = isl_adj) %>%
+  rename(f_pred_catch_bin_fit = pred_catch_bin_fit)
 ```
 
-# Error 
-Generates coefficients drawn from within the ci of each variable.
-```{r error, include = FALSE}
-# number of samples (all estimates)
-    n1 <- 100
+# Error coeficients
+Generates n1 coefficients drawn from within a multivariate normal distribution for each variable in v. 
 
-# draws n1 numbers (nrow) from within a multivariate normal distribution for each variable (length)
-# mu = vector of means, Sigma = covarience matrix
+```{r error, include = FALSE}
+    n1 <- 100 # number of draws (all estimates)
+
+# mu = vector of means, Sigma = variance matrix
     mvn_b <- mvrnorm(n1, mu = b$Coef, Sigma = as.matrix(v)) 
+    
 # dim(mvn_b)[1] == n1 # should be true
 # dim(mvn_b)[2] == nrow(b) # should be true
 ```
 
 # Utility
-Calculate the utility (Vj) for every alternative, each individual observation in dat represents an alternative. 
+Calculate the utility (Vj) for every alternative, each observation in dat represents an alternative. 
 
 We expect recreator  (i) to choose the site (j) with the highest expected utility. The utility  (Vj) of a site is a function of the observed attributes (B) of those sites and associated error (e).
 
       Vj = B(depth, travel cost etc.) + e 
+      
+At the end of this chunk, Vj should have nrow(dat) and n1 columns. 
 
 ```{r utility, include = FALSE}
-
   # bid <- unique(b$Vars) 
   # id_vars <- dat %>% dplyr::select(matches(bid))
-  # vars <- c(names(id_vars), "isl_adj") #TODO automate
+  # vars <- c(names(id_vars), "isl_adj")
       
     # turn defined vars into matrix from dat, make sure there is no geometry
         rum_matrix <- as.matrix(dat[, vars])
         
     # create an empty utility matrix
         Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) 
-    
-# calculate fixed utility for every alternative (nrows), n1 times from multivariate random normal distribution. %*% is a matrix multiplication where...
-# We are multiplying the values in the rum_matrix (real data) by the error coefficients matrix (mvn_b)? so we have 100 utility values for each variable -? why? 
 
+        # calculate utility
     for (i in 1:n1) { 
       Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
     }
@@ -118,110 +105,125 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
     Vj <- exp(Vj) # get exponential of utility
 ```
 
-The probability of a recreator (i) choosing site (j) is the exponential of the the utility of the site (j) divided by the sum of the utility of all the potential alternatives the recreator could have choosen (including site j). This is a conditional logit formula. 
+# Probability 
+The probability of a recreator (i) choosing site (j) is the exponential of the the utility of the site (j) divided by the sum of the utility of all the potential alternatives the recreator could have chose (including site j). This is a conditional logit formula.
 
     probj = exp(Vj)/sum(exp(Vj))
     
+At the end of this chunk:
+  - Vj should have n1 + 3 cols (br, ID and tc)
+  - p should have nrow(dat) and n1 cols. 
+  - logsum_base should have a row per boat ramp and n1 + 1 (br) cols, for base scenario. 
+  - dat should have 3 extra cols, with the probability estimates of each recreator visiting each        site under the base scenario: p.mean_base, p.low_base, p.upp_base
+  
+## Base probability  
 ```{r Probabilities, include = FALSE}
-# Probabilities
+dat %<>% mutate(gridid_alt = as.integer(gridid_alt))
 
+# Probabilities
     Vj <- as.data.table(Vj) # make data.table to save RAM
     cols <- colnames(Vj) # save the names of the draws for later
-    Vj$br <- as.integer(dat$Site) # run function by BR
-    Vj$ID <- as.integer(dat$gridID_alt) # add gridID_alt for group_by
-    Vj$tc <- dat$tc3L # add travel cost
+    Vj$br <- as.integer(dat$rampid) # run function by BR
+    Vj$ID <- as.integer(dat$gridid_alt) # add gridid_alt for group_by
+    Vj$tc <- dat$nl_fcflt_spgam # add travel cost
 
 # Calculate probability of visit and logsums: pre-simulation
 # probability function:  probj = exp(Vj)/sum(exp(Vj))
 
-    f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)} 
+    f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)} # as.integer stops function changing br and IDs
+    
+    ntz <- ntz$gridid # gridids of current sz
+    Vj[Vj$ID %in% ntz, cols] <- 0 # remove current SZ
     
     # applying probability function to every utility cell in Vj by boat ramp
-
-    # npz <- dat %>%  filter(NPZ == 1) # remove for 5 km grid
-    # 
-    # Vj[Vj$ID %in% npz$gridID_alt, cols] <- 0 # remove for 5 km grid
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] 
     p <- p[order(br, ID)]
-    dat %<>% arrange(Site, gridid_alt)
-    table(dat$gridid_alt == p$ID) # this should all be true (they do now)
+    dat %<>% arrange(rampid, gridid_alt)
+    table(dat$gridid_alt == p$ID) # this should all be true
     
-    # alternatives presented to the person - sum of exp(Vj)
+    # sum utility of each boat ramp for each set of draws (cols in Vj)
      logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]
     
     p <- p[ , br := NULL]
     p <- p[ , ID := NULL]
     p <- as.matrix(p)   
 
-# Calculates probability of visit summary statistics by row. This is the base probability of each site, for each trip and the error. 
-# For each site p has 100 estimates of the p of visiting that site me give me tyhe average, median, ci..
+# For every row in p (which match the rows in dat), calculate the the lci, mean and uci probability of the recreators visiting each alternative from n1 draws, in the base scenario. 
 
-    dat$p.mean_base <- rowMeans(p) # median
+    dat$p.mean_base <-  rowQuantiles(p, probs = sqrt(0.5)) # mean
     dat$p.low_base <- rowQuantiles(p, probs = sqrt(0.025)) # lower ci
     dat$p.upp_base <- rowQuantiles(p, probs = 1 - sqrt(0.025)) # upper ci 
     
 # save output
     # write.csv(dat, "./ignore/03_data/3.1_basedat.csv")
     # write.csv(logsum_base, "./ignore/03_data/3.1_logsum_base.csv")
-
 ```
 
-# Sim 1
+## Simulated probability
+Now I edit Vj to make the utility of simulated ntz's to 0, and calculate the probabilities of each recreators visiting each site under the new scenario.  
+
+At the end of this chunk:
+  - Vj should have n1 + 3 cols (br, ID and tc), and utilities will be updated for the simulated         scenario.
+  - p should have nrow(dat) and n1 cols, with updated probabilities for the simulated scenario. 
+  - logsum_sim should have a row per boat ramp and n1 + 1 (br) cols, for simulated scenario. 
+  - dat should have 3 extra cols, with the probability estimates of each recreator visiting each        site under the simulated scenario: p.mean_sim, p.low_sim, p.upp_sim
+
 ```{r closures, include = FALSE}
 # Assign closures
-# 5km grid
-# sim <- st_read("./data/gpkg/sim1_5km.gpkg")
+sim <- st_read("./data/gpkg/sim3_grid.gpkg") %>% st_make_valid() # shp of cells in sim
 # sim %<>% rename(gridID_alt = fid)
-# ntz <- c(sim$gridID_alt)
-
-# 1km grid
-# sim <- st_read("./data/gpkg/Sim 1.gpkg")
-# ntz <- sim$gridID_alt
+sim <- c(sim$gridid)
 
 # Calculate probability of visit and logsums: post-simulation
+    # Vj[Vj$ID %in% npz$gridID_alt, cols] <- 0 
+    Vj[Vj$ID %in% sim, cols] <- 0 # set utility of sim ntz to 0
     
-    # Vj[Vj$ID %in% npz$gridID_alt, cols] <- 0 # remove for 5km grid
-    Vj[Vj$ID %in% ntz, cols] <- 0
+    # applying probability function to every utility cell in Vj by boat ramp
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")]
     p <- p[order(br, ID)]
-    dat %<>% arrange(BR, gridID_alt)
-    table(dat$gridID_alt == p$ID) # should all be true
+    dat %<>% arrange(rampid, gridid_alt)
+    table(dat$gridid_alt == p$ID) # should all be true
     
-    logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols] #18876 trips
+    # sum utility of each boat ramp for each set of draws (cols in Vj)
+    logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols] 
     
     p <- p[ , br := NULL]
     p <- p[ , ID := NULL]
     p <- as.matrix(p)
     
+# For every row in p (which match the rows in dat), calculate the the lci, mean and uci probability of the recreators visiting each alternative from n1 drawws, in the simulated scenario (sim). 
     
-# Calculates probability of visit summary statistics by row. This is the simulated probability of each site, for each trip and the error. 
-
-    dat$p.mean_sim <- rowMeans(p)
+    dat$p.mean_sim <- rowQuantiles(p, probs = sqrt(0.5)) # lower ci
     dat$p.low_sim <- rowQuantiles(p, probs = sqrt(0.025)) #saving outputs back to p
     dat$p.upp_sim <- rowQuantiles(p, probs = 1 - sqrt(0.025)) #Note below about weird probs
-    
-    # ggplot() +
-    #   geom_sf(data = sites) +
-    #   geom_sf(data = sim, fill = "red")
 ```
 
-# Extract Welfare
+# Welfare estimates
+Now we are extracting the welfare impact of the new scenario. This is a measure of how much a recreator is willing to pay to avoid the scenario therefore, higher value indicate that the scenario will have a bigger impact on the reacreators welfare and therefore they are willing to pay more to avoid it. 
+
+We will calculate the welfare estimates per trip and then multiple that by annual boat launches to get an annual welfare estimate. 
+
+## Trip
+
+At the end of this chunk:
+  - W: welfare estimates for each boat ramp (nrow) for each draw (n1 cols). 
+  - logsum_sim should have 3 extra cols with welfare impacts for lci, mean and uci. 
+  - dat should have 3 extra cols with welfare impacts for lci, mean and uci.
+
 ```{r welfare, include = FALSE}
-# Extracting the welfare impact
-    W <- logsum_sim[, -1] -  logsum_base[, -1]
-    W <- t(W)/mvn_b[ ,1] # length of this does not match n1/mvn_b
+# calculate the difference between the welfare estimates in simulated and base scenario for each br
+    W <- logsum_sim[, -1] -  logsum_base[, -1] 
+    W <- t(W)/mvn_b[ ,1]
     W <- t(W)
 
-# Summaries across draws
+# For every row in W (which match the rows in logsum_sim), calculate the the lci, mean and uci welfare impact for each boat ramp, from n1 draws, in the simulated scenario (sim). 
+    
     W <- as.matrix(W)
-    logsum_sim$w.mean <- rowMeans(W)
+    logsum_sim$w.mean <- rowQuantiles(W, probs = sqrt(0.5))
     logsum_sim$w.low <- rowQuantiles(W, probs = sqrt(0.025)) 
     logsum_sim$w.upp <- rowQuantiles(W, probs = 1 - sqrt(0.025))
-    logsum_sim$upp.ci <- logsum_sim$w.upp - logsum_sim$w.mean
-    
-    dat %<>%  mutate(BR = as.integer(BR))
   
-    dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low", "upp.ci")], by = c("BR" = "br"))
+    dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("rampid" = "br"))
 
     # # Welfare impact of closure
     W_impact_trip <- logsum_sim %>%
@@ -240,61 +242,29 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
   # write.csv(dat, "./ignore/03_data/3.1_Wsimdat.csv")
   # write.csv(logsum_sim, "./ignore/03_data/3.1_logsum_sim.csv")
 ```
-# Annual welfare impacts per boat ramp
 
-## Annual BR visits
-This chunk sums monthly br visits and gravity functions to get annual estimates and joins to rum data. 
-  
-```{r brtrip data prep, include = FALSE}
-# checking brs match
-    setdiff(BRtrips$RampID, dat$BR)
-    setdiff(dat$BR, BRtrips$RampID)
+## Annual
 
-# joining trip data to dat
-    RUM <- dat %>% left_join(.,BRtrips, by = c("BR" = "RampID" ), suffix = c("", "_Ramp"))
-```
+Annual estimates for each boat ramp were from Matta BR trips script, which summed monthly estimates across region (eg. Gascoyne) and then used a gravity function to get annual estimates based on population proximity. This leads to error on individual boat ramp, for example tantabiddi is the busiest boat ramp in Exmouth because its close to the reef not because its close to town. Therefore we don't look at estimates for individual boat ramps. 
 
-## Multipling welfare impacts across annual br visits
-
-This chunk merges estimates of trip numbers at each ramp each annually (BRtrips) with estimates of
-the probability of visiting each grid (by annually) given a particular boat ramp was selected (dat). 
+Then we merges estimates of annual trip numbers at each ramp (BRtrips) with estimates of
+the probability of visiting each grid given a particular boat ramp was selected (dat). 
 
   - Number of annual trips per br * the W impact of each br
   
 ```{r br multiplication, include = FALSE}
-    RUM_W <- RUM %>% distinct(.,BR, .keep_all = TRUE) %>%
+# Joining annual boat ramp visits
+    setdiff(BRtrips$RampID, dat$rampid) # make sure they match
+    setdiff(dat$rampid, BRtrips$RampID) # make sure they match
+
+    RUM <- dat %>% left_join(.,BRtrips, by = c("rampid" = "RampID" ), suffix = c("", "_Ramp"))
+
+# Calculate the annual welfare impact per boat ramp. There is only one value of annual boat launches for every ramp so using distinct to isolate br - doesnt matter what trip they are from. 
+    RUM_W <- RUM %>% distinct(.,rampid, .keep_all = TRUE) %>%
       mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*w.mean, .names = "welf_mean_{.col}" ),
              across(starts_with("upp_TRIPS"), ~.x*w.upp, .names = "welf_upp_{.col}" ),
              across(starts_with("low_TRIPS"), ~.x*w.low, .names = "welf_low_{.col}" ))
 
-# check match BR in shp file
-    setdiff(RUM_W$BR, BRtrips$RampID)
-    setdiff(BRtrips$RampID, RUM_W$BR)
-    
-# join to shp file
-    # RUM_W %<>% left_join(BR[,c("RampID")], by = c("BR" = "RampID"), suffix = c("","_ramp"))
-    
-# multiplied br numbers by corresponding probabilities. Note that because we adjusted the probs above to 
-# sqrt(0.025) we should now have accurate 95% CIs. 
-    
-    RUM %<>% mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*p.mean_sim, .names = "mean_sim_{.col}" ),
-                             across(starts_with("TRIPS_ramp_prop"), ~.x*p.mean_base, .names =
-                                      "mean_base_{.col}"),
-                             across(starts_with("upp_TRIPS"), ~.x*p.upp_sim, .names = "upp_sim_{.col}" ),
-                             across(starts_with("upp_TRIPS"), ~.x*p.upp_base, .names = "upp_base_{.col}" ),
-                             across(starts_with("low_TRIPS"), ~.x*p.low_sim, .names = "low_sim_{.col}" ),
-                             across(starts_with("low_TRIPS"), ~.x*p.low_base, .names = "low_base_{.col}" ))
-
-# Sum by grid (over ramps) to get use at grid level
-      RUM_grid <- RUM %>% group_by(gridID_alt) %>%  # was just grouping by ID
-      summarise(across(starts_with(c("mean_sim_","upp_sim_","low_sim_","mean_base_", "upp_base_", 
-                                     "low_base_")), sum))
-# join it to geometry
-    RUM_grid <- right_join(grid, RUM_grid, by = c("gridID_alt"))
-```
-
-# Welfare impacts
-```{r totW, include = FALSE}
 W_impact <- RUM_W %>% summarise(round(across(starts_with(c("welf_low", "welf_mean","welf_upp")), sum)))
 
 W_impact %<>%  rename("Annual lower welfare impact ($)" = welf_low_low_TRIPS_Grvt__5,
@@ -307,25 +277,50 @@ W_impact
 # grid.table(W_impact)
 # dev.off()
 ```
+# Spatial impact
 
+## Spatial data prep
+To make spatial plots of annual visits, the probability of each site being visited needs to be multiplied by annual boat ramp launches. 
+```{r}
+# Multiply probabilities by annual boat launches
+    RUM %<>% mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*p.mean_sim, 
+                           .names = "mean_sim_{.col}" ),
+                    across(starts_with("TRIPS_ramp_prop"), ~.x*p.mean_base, 
+                           .names = "mean_base_{.col}"),
+                    across(starts_with("upp_TRIPS"), ~.x*p.upp_sim, 
+                           .names = "upp_sim_{.col}" ),
+                    across(starts_with("upp_TRIPS"), ~.x*p.upp_base, 
+                           .names = "upp_base_{.col}" ),
+                    across(starts_with("low_TRIPS"), ~.x*p.low_sim, 
+                           .names = "low_sim_{.col}" ),
+                    across(starts_with("low_TRIPS"), ~.x*p.low_base, 
+                           .names = "low_base_{.col}" ))
 
+# Sum probabilities within grid by ramp, to get use at grid level
+    RUM_grid <- RUM %>% 
+      group_by(gridid_alt) %>%
+      summarise(across(starts_with(c("mean_sim_","upp_sim_","low_sim_","mean_base_", "upp_base_", 
+                                     "low_base_")), sum))
+      
+    RUM_grid <- right_join(grid, RUM_grid, by = c("gridid" = "gridid_alt")) # add geometry
+    
+    # calculate difference in probability of visits from base to scenario to make difference plot
+    RUM_grid %<>%
+     mutate(mean_diff = mean_sim_TRIPS_ramp_prop_Grvt__5 - mean_base_TRIPS_ramp_prop_Grvt__5,
+            upp_diff = upp_sim_upp_TRIPS_Grvt__5 - upp_base_upp_TRIPS_Grvt__5,
+            low_diff = low_sim_low_TRIPS_Grvt__5 - low_base_low_TRIPS_Grvt__5) %>% 
+      filter(mean_diff >= 0) # remove current sz
+```
 
+## Spatial plots
 ```{r sc_spimpact, include = FALSE}
 # add planning area and crop to it
-mp_bbox <- st_read("./data/gpkg/StudySite_4283.gpkg") %>% st_transform(crs(RUM_grid))
+mp_bbox %<>% st_transform(crs(RUM_grid))
 mpbr <- as.data.frame(st_intersects(BRtrips, mp_bbox, sparse = FALSE))
 BRtrips$mpbr <- mpbr$V1
 sp_mpbr <- BRtrips %>% filter(mpbr == TRUE)
 mpbr <- sp_mpbr$RampID
-
 # bbox <- RUM_grid %>% filter(BR %in% mpbr)
-# 
-RUM_grid %<>%
-     mutate(mean_diff = mean_sim_TRIPS_ramp_prop_Grvt__5 - mean_base_TRIPS_ramp_prop_Grvt__5,
-            upp_diff = upp_sim_upp_TRIPS_Grvt__5 - upp_base_upp_TRIPS_Grvt__5,
-            low_diff = low_sim_low_TRIPS_Grvt__5 - low_base_low_TRIPS_Grvt__5) %>% 
-  filter(mean_diff >= 0)
-# 
 # bbox <- RUM_grid %>% st_crop(mp_bbox)
 # mp %<>% st_transform(crs(bbox))
 # mp_crop <- mp %>% st_crop(bbox)
@@ -376,39 +371,40 @@ postsim
 diff
 ```
 
-## Welfare impacts per boat ramp
+# ARCHIVE
+Welfare impacts per boat ramp
+Since the gravity function does not provided acuarte estimate of boat ramp launch on an individual level - this plot is meaningless. 
 ```{r welfare_bar, include = FALSE}
-RUM_W$BR <- as.factor(RUM_W$BR)
+# RUM_W$BR <- as.factor(RUM_W$BR)
+# 
+# W_BRimpact <- RUM_W %>% group_by(BR, Ramp_name) %>%
+#       summarise(round(across(starts_with(c("welf_low", "welf_mean","welf_upp")), sum))) %>% 
+#   filter(welf_mean_TRIPS_ramp_prop_Grvt__5 > 0)
+# 
+# W_BRimpact_bar <- W_BRimpact %>%
+#   ggplot(.) +
+#   geom_bar(aes(x = BR, y = welf_mean_TRIPS_ramp_prop_Grvt__5), stat = "identity",  fill = col) +
+#   geom_errorbar(aes(x = BR, ymin = welf_low_low_TRIPS_Grvt__5, ymax = welf_upp_upp_TRIPS_Grvt__5), width = 0.2) +
+#   my_theme +
+#   scale_x_discrete(drop = T, labels = W_BRimpact$Ramp_name) +
+#   theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+#   ylab("Annual welfare impacts on\nrecreational fishers ($)") +
+#   xlab("Boat Ramp")
+# 
+# W_BRimpact_bar
+# ggsave(path = "./plots", filename = paste("sim1.W_BRimpact_bar.png", sep = ''), plot = W_BRimpact_bar, width = 8, height = 4)
+# 
+# 
+# W_BRimpact %<>%  rename("Annual lower welfare impact ($)" = welf_low_low_TRIPS_Grvt__5,
+#                         "Annual mean welfare impact ($)" = welf_mean_TRIPS_ramp_prop_Grvt__5,
+#                         "Annual upper welfare impact ($)" = welf_upp_upp_TRIPS_Grvt__5)
+# 
+# W_BRimpact
+# png("./plots/sim1.W_BRimpact.png", height = 50*nrow(W_BRimpact), width = 150*ncol(W_BRimpact))
+# grid.table(W_BRimpact)
+# dev.off()
 
-W_BRimpact <- RUM_W %>% group_by(BR, Ramp_name) %>%
-      summarise(round(across(starts_with(c("welf_low", "welf_mean","welf_upp")), sum))) %>% 
-  filter(welf_mean_TRIPS_ramp_prop_Grvt__5 > 0)
-
-W_BRimpact_bar <- W_BRimpact %>%
-  ggplot(.) +
-  geom_bar(aes(x = BR, y = welf_mean_TRIPS_ramp_prop_Grvt__5), stat = "identity",  fill = col) +
-  geom_errorbar(aes(x = BR, ymin = welf_low_low_TRIPS_Grvt__5, ymax = welf_upp_upp_TRIPS_Grvt__5), width = 0.2) +
-  my_theme +
-  scale_x_discrete(drop = T, labels = W_BRimpact$Ramp_name) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
-  ylab("Annual welfare impacts on\nrecreational fishers ($)") +
-  xlab("Boat Ramp")
-
-W_BRimpact_bar
-ggsave(path = "./plots", filename = paste("sim1.W_BRimpact_bar.png", sep = ''), plot = W_BRimpact_bar, width = 8, height = 4)
-
-
-W_BRimpact %<>%  rename("Annual lower welfare impact ($)" = welf_low_low_TRIPS_Grvt__5,
-                        "Annual mean welfare impact ($)" = welf_mean_TRIPS_ramp_prop_Grvt__5,
-                        "Annual upper welfare impact ($)" = welf_upp_upp_TRIPS_Grvt__5)
-
-W_BRimpact
-png("./plots/sim1.W_BRimpact.png", height = 50*nrow(W_BRimpact), width = 150*ncol(W_BRimpact))
-grid.table(W_BRimpact)
-dev.off()
-```
-
-```{r}
+# Adding it in a loop across brs
 # for (i in W_BRimpact$BR) {
 #   br <- BRtrips %>% filter(RampID %in% i)
 # bbox <- RUM_grid %>%  filter(BR %in% i)
@@ -448,9 +444,8 @@ dev.off()
 # ggsave(path = "./plots", filename = paste("sim1.", br$Ramp_name,"_postsim.png", sep = ''), plot = postsim, width = 8, height = 4)
 # print(postsim)
 # }
-```
 
-```{r difference plots}
+# loop for difference plots for each boat ramp 
 # RUM_grid %<>%
 #      mutate(mean_diff = mean_sim_TRIPS_ramp_prop_Grvt__5 - mean_base_TRIPS_ramp_prop_Grvt__5,
 #             upp_diff = upp_sim_upp_TRIPS_Grvt__5 - upp_base_upp_TRIPS_Grvt__5,

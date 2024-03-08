@@ -32,13 +32,13 @@
     
     coast <- st_read("./data/gpkg/coast.gpkg") %>%  st_transform(4283)
     
-    ext <- st_read("./data/gpkg/gridextent.gpkg") # study site (mega mvm polygon)
+    ext <- st_read("./data/gpkg/model_extent_v3.gpkg") %>% st_transform(4283) # study site (mega mvm polygon)
     
     # artInfra <- st_read("./data/gpkg/ArtReef.gpkg")
     
     # ntz <- st_read("./data/gpkg/ntz.gpkg") # commonwealth and current state NTZ
-    ntz <- st_read("./data/gpkg/Ning_sim+sz.gpkg") # commonwealth and current state NTZ
-    
+    ntz <- st_read("./data/gpkg/ning_sim+sz.gpkg") %>%  st_transform(4283)# commonwealth and current state NTZ
+
     
      habitat <- st_read("./data/gpkg/ning_hab.gpkg") %>% 
       st_transform(crs = 4283) %>% 
@@ -51,11 +51,11 @@
     
     # check layers
     # ggplot() +
-    # # geom_sf(data = tmp, lwd = 0.05)
-    # # geom_sf(data = ext, lwd = 0.05) +
-    # # geom_sf(data = coast) +
-    # # geom_sf(data = BR, colour = 'red') +
-    # geom_sf(data = sim)
+    # # # geom_sf(data = tmp, lwd = 0.05)
+    # geom_sf(data = ext, lwd = 0.05) +
+    # # # geom_sf(data = coast) +
+    # # # geom_sf(data = BR, colour = 'red') +
+    # geom_sf(data = ntz, fill = "green")
     
     # ggplot() +
     #   geom_sf(data = habitat, aes(fill = habitat), lwd = 0.1)
@@ -75,6 +75,7 @@
   grid$area <- round(set_units(st_area(grid), km^2), 2) 
 
   grid %<>% mutate(area = as.numeric(area)) 
+
    
    # grid %<>% filter(area >= 3)
    
@@ -89,6 +90,7 @@
   ntz_grid$area <- round(set_units(st_area(ntz_grid), km^2), 2) 
 
   ntz_grid %<>% mutate(area = as.numeric(area)) 
+
    
   # ntz_grid %<>% filter(area >= 3)
   
@@ -162,7 +164,8 @@ Calculates the area (km2) of each habitat type in each individual grid cell (sit
     st_drop_geometry()
   
   #'[#VALIDATE: If grid and hab_grid do not have the same rows than some grids are out with the habitat layer. check to see what these or so they can be filled in or removed]
-    
+
+  
   # nrow(grid) == nrow(hab_grid)
   # 
   # diff <- grid %>% filter(gridID %in% c(setdiff(grid$gridID, hab_grid$gridID)))
@@ -175,9 +178,26 @@ Calculates the area (km2) of each habitat type in each individual grid cell (sit
     
   grid %<>% left_join(hab_grid, by = "gridid")
   
-  grid <- grid %>% 
-    mutate(pelagic = ifelse(is.na(pelagic), area, pelagic)) %>% 
-    mutate_at(c("lagoon", "reef", "rreef"), ~replace_na(.,0))
+
+# checks
+which(grid$lagoon > grid$area)
+which(grid$rreef > grid$area)
+which(grid$reef > grid$area)
+
+summary(grid$lagoon)
+summary(grid$rreef)
+summary(grid$reef)
+
+ggplot()+
+  geom_sf(data = grid, aes(fill = lagoon), lwd = 0.05)
+ggplot()+
+  geom_sf(data = grid, aes(fill = rreef), lwd = 0.05)
+ggplot()+
+  geom_sf(data = grid, aes(fill = reef), lwd = 0.05)
+
+grid %<>% 
+  mutate(reefs = rreef + reef) %>%  # sum reefs into one
+  mutate_at(c("lagoon", "reefs"), ~replace_na(.,0))
 ```
 
 ## Land
@@ -297,4 +317,6 @@ Creates binary list indicating whether there is artificial infrastructure presen
 # Save output
 ```{r save}
 saveRDS(grid, "./data/gpkg/2.0_Sites_4283.gpkg")
+
+st_write(grid, "./data/gpkg/2.0_SitesQ_4283.gpkg") # for QGIS
 ```

@@ -20,6 +20,11 @@ library(corrr)
 library(tidyverse)
 library(magrittr)
 library(sf)
+library(car)
+library(doBy)
+require(gplots)
+library(RColorBrewer)
+library(janitor)
 # library(ggBRT)
 
 # functions
@@ -27,85 +32,171 @@ source("./functions/brtFunc.R")
 source("./functions/theme.R")
 
 # Simulation
-sim_name <- "sim1"
+sim_name <- "sim3"
 
-# Full data to predict to
-# full_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg")  # ATTRIBUTE MODEL
-# full_dat <- read.csv("./data/02_data/2.1_dat_base.csv") # CHARLOTTE - NO SIM
-# full_dat <- read.csv(paste0("./data/02_data/2.1_asc_rum_", sim_name,".csv")) %>% 
-full_dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim_name,"_4283.gpkg")) %>% 
+#### Full data - ctcah will be predicted to this data 
+full_dat <- readRDS("./data/gpkg/sims/2.1_dat.gpkg") %>%  # ATTRIBUTE MODEL
+  rename(catch = CaughtUndam) %>% # making stat friendly
+  mutate(side = ifelse(Site %in% c("ExmouthBR", "BundegiBR"), "East", "West")) %>%
+  mutate(side = as.factor(side)) %>%
+  mutate(launch2 = ifelse(Site %in% c("ExmouthBR", "BundegiBR"), "G", NA)) %>%
+  mutate(launch2 = ifelse(Site %in% "TantabiddiBR", "T", launch2)) %>%
+  mutate(launch2 = ifelse(is.na(launch2), "CB", launch2)) %>%
+  mutate(launch2 = as.factor(launch2)) %>% 
   mutate(season = ifelse(TripMonth %in% c("Sep", "Oct"), "Spring", 
                            ifelse(TripMonth %in% c("Jul", "Aug"), "Winter",
-                                  "Autumn"))) %>% # ASC MODEL This section is now in wrangle so when you run that script again youb can get riude of this
-  mutate(facYear = as.factor(numYear)) %>% 
-  mutate(reefs = ifelse(is.na(reefs), 0, reefs)) %>% 
-  mutate(lagoon = ifelse(is.na(lagoon), 0, lagoon)) 
+                                  "Autumn"))) %>%
+  mutate(facyear = as.factor(numYear))
 
-# Data to model
-# dat <- full_dat %>% filter(choice == 1 & FishingType %in% "Demersal")
-dat <- full_dat %>% filter(choice == 1 & FishingType %in% "Demersal" )
+# full_dat <- read.csv("./data/02_data/2.1_dat_base.csv") # CHARLOTTE - NO SIM
+
+# full_dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim_name,"_4283.gpkg")) %>%  # ASC MODEL
+#   # Ad this to wrangle next time you run it. 
+#   mutate(facYear = as.factor(numYear)) %>% 
+#   mutate(side = ifelse(Site %in% c("ExmouthBR", "BundegiBR"), "East", "West")) %>% 
+#   mutate(side = as.factor(side)) %>% 
+#   mutate(launch2 = ifelse(Site %in% c("ExmouthBR", "BundegiBR"), "G", NA)) %>% 
+#   mutate(launch2 = ifelse(Site %in% "TantabiddiBR", "T", launch2)) %>% 
+#   mutate(launch2 = ifelse(is.na(launch2), "CB", launch2)) %>% 
+#   mutate(launch2 = as.factor(launch2)) %>% 
+#   mutate(logdepth = log(depth)) %>% 
+#   rename(catch = CaughtUndam) %>% # making stat friendly
+#   mutate(season = ifelse(TripMonth %in% c("Sep", "Oct"), "Spring", 
+#                            ifelse(TripMonth %in% c("Jul", "Aug"), "Winter",
+#                                   "Autumn"))) 
+
+# making cols stat friendly
+names(full_dat) <- tolower(names(full_dat))
+names(full_dat) <- gsub("\\.", "", names(full_dat))
+          
+##### Filter full data to data to use for modelling
+dat <- full_dat %>% filter(choice == 1 & fishingtype %in% c("Demersal"))
                            # # & Site %in% c("TantabiddiBR", "CoralBayBR"))
                            # & Site %in% c("BundegiBR", "ExmouthBR") 
                            # & facYear %in% c("2015", "2016"))
 ```
+Stata will change all vars to lower case and will remove full stops. Please make all vars stata friendly and do transformations first. 
 
-# FSSgam
-## Response
+
+# Responses
+Data avaliable
+Jon's data: catch (numeric) and fishing type (demersal or trolling)
+Nicole's data: catch, fishing type and fish group caught (e.g. demersal, pelagic etc.)
+
+I am going to store the optimal catch predictions for the following responses options, ordered by what seems most sensible ot suse:
+
+  1. catch (previously CaughtUndam): all data, continuous response, consistent between Nicole's and Jon's data (based on fishing type only)
+  2. catch_bin: all data, binomial response, consistent between Nicole's and Jon's data (based on fishing the only)
+  3. dem: all data, continuous response, Jon's catch data for demersal fishers and Nicole's records of demersal catch by demersal fishers
+  4. dem bin: binomial response, Jon's catch data for demersal fishers and Nicole's records of demersal catch by demersal fishers
+  5. average catch
+
+I will test all these models in my ASC + ATT RUM. 
+
 ```{r}
-dat <- dat %>% # Jon doesn't have number of fish kept, just caught undamaged
-  mutate(CaughtUndam = as.integer(CaughtUndam)) %>%
-  mutate(caught_bin = ifelse(CaughtUndam > 0, 1, 0)) # potentially to test
+# prep responses
+dat %<>% 
+  mutate(catch_bin = as.factor(ifelse(catch > 0, "1", "0"))) %>% # binary response for caught undam
+  mutate(dem = ifelse(numyear < 2019, catch, dem)) %>% # Get Jons data into the demersal column to make dem_bin
+  mutate(dem_bin = as.factor(ifelse(dem > 0, "1", "0")))  #  binary response for demersal fish (caught Jon, demersal mine) 
 
-resp <- dat$caught_bin
-# resp <- dat$Dem_bin 
-# dat$Dem_bin <- as.factor(dat$Dem_bin)
+av <- dat %>%
+  group_by(gridid_alt) %>%
+  summarize(av_catch = round(mean(catch)))
 
-which(is.na(dat$resp))
-zeros <- round(nrow(dat[which(resp == 0),])/nrow(dat)*100, 2)
+dat %<>% left_join(av)
+
+resp.vars <- c("catch", "dem", "catch_bin", "dem_bin", "av_catch") # define responses
+
+colSums(is.na(dat[, resp.vars])) # make sure no NAs
+
+# Create an empty list to store plots
+plots_list <- list()
+
+# Loop through each column in resp.vars
+for (col_name in resp.vars) {
+  # Check if the column is a factor
+  if (is.factor(dat[[col_name]])) {
+    # Create a bar plot for factors
+    bar_plot <- ggplot(data = dat, aes_string(x = col_name)) +
+      geom_bar(fill = "darkturquoise") +
+      xlab(col_name) +
+      ylab("Frequency") +
+      theme_classic()
+    
+    # Add the bar plot to the list
+    plots_list[[col_name]] <- bar_plot
+  } else {
+    # Calculate percentage of zeros for numeric variables
+    zeros <- round(sum(dat[[col_name]] == 0, na.rm = TRUE) / nrow(dat) * 100, 2)
+    
+    # Create histogram plot for numeric variables
+    hist_plot <- ggplot(data = dat, aes_string(x = col_name)) +
+      geom_histogram(fill = "darkturquoise") +
+      xlab(col_name) +
+      ylab("Frequency") +
+      annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
+      theme_classic()
+    
+    # Add the histogram plot to the list
+    plots_list[[col_name]] <- hist_plot
+  }
+}
+
+print(plots_list)
+
+# 1. catch: 3% zeros, but lots of low numbers, if you look at catch_bin you can see that most people catch at least one fish - this is because there is nearshore fish mixed in wit this.  
+# 2. catch_bin: more people catch fish than don't catch because of near shore fish mixed in - not ideal (maybe dem_bin better)
+# 3. dem: same pattern as catch but higher % zeros (8%)
+# 4. dem_bin: as expected, most people dont catch fish
+# 5. av_catch: distribution looks terrible, but might be more spatially accuarte
+
+# testing spatial distribution of average catch
+grid <- dat %>% distinct(gridid_alt, .keep_all = TRUE)
+
 ggplot() +
-  geom_histogram(data = dat, aes(x = resp), fill = "darkturquoise") +
-  xlab("Demersal Catch") +
-  ylab("Frequency") +
-  annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
-  theme_classic()
+  geom_sf(dat = grid$asc_geom, aes(fill = grid$av_catch))
 
-# dat %<>% filter(Dem < 16)
+# some high catch nearshore, low catch in AMP near boat ramps
 ```
 
-## Vars to test
+
+# FSSgam
+## Covariates to test
 ```{r}
 # set the continuous predictors to test
 # pred.vars <- c("dem", "depth", "l_km_br", "nl_km_br", "pelagic", "reef", "rreef", "lagoon", "decDuration", "rug", "centroidLat") # FOR CHARLOTTE
-pred.vars <- c("depth", "km_BR", "reefs", "lagoon", "decDuration", "rug", "MedianHour", "exTimes12m", "centLat") # ASC
-# pred.vars <- c("CaughtUndam", "depth", "pelagic", "reef", "rreef", "lagoon", "decDuration", "rug", "centLat", "MedianHour", "exTimes12m", "ln_km_br") # ATTRIBUTE
-
+# pred.vars <- c("depth", "km_br", "reefs", "lagoon", "rug", "medianhour", "extimes12m", "centlat") # ASC
+pred.vars <- c("depth", "reefs", "lagoon", "rug", "centlat", "medianhour", "extimes12m") # ATTRIBUTE
 
 # factor vars 
-factor.vars <- c("season", "BaitLure") # east/west model
-# factor.vars <- c("season", "BaitLure", "gulf")
+factor.vars <- c("season", "baitlure", "launch2", "side") 
 dat %<>% mutate(across(all_of(c(factor.vars)), as.factor))
 
 # rum.vars
-rum.vars <- c("fcflt_spgam", "swell")
+# rum.vars <- c("fcflt_spgam")
+rum.vars <- c("nl_fcflt_spgam")
 ```
 
-
 ## NAs
-There needs to be no NAs in the predictors in the full data set the model can predict on to teh full data set. 
+There needs to be no NAs in the predictors in the full data set the model can predict on to the full data set. 
 ```{r}
 # check continuous vars 
 summary(full_dat[,pred.vars]) 
-pred.vars <- pred.vars[ !pred.vars == "exTimes12m"] # remove 
-
-# full_dat
+pred.vars <- pred.vars[ !pred.vars == "extimes12m"] # remove 
 
 # check factors vars
 names(which(colSums(is.na(dat[,factor.vars]))>0)) 
-factor.vars <- factor.vars[ !factor.vars == "BaitLure"] # remove 
+factor.vars <- factor.vars[ !factor.vars == "baitlure"] # remove
 ```
 
 ## Correlation
 Check the correlation between the catch and rum predictors. 
+
+Concerned about correlation between latitude, side and launch. Latitude was always included but we added side because latitude in the are and west are different. Launch is basically the boat ramp so included both the side and launch so i think i need to have side & latitude OR launch. However, now that i think about it, i think launch might be correlated with cost?
+
+Removing launch as a variable because of potential correlation with cost. 
+
 ```{r}
 # Check the correlations between predictor variables - remove if over 95
 correlate(dat[,c(pred.vars, rum.vars)], use = "complete.obs") %>%  
@@ -114,7 +205,12 @@ correlate(dat[,c(pred.vars, rum.vars)], use = "complete.obs") %>%
   arrange(-cor) %>% 
   distinct(cor, .keep_all = TRUE)
 
-pred.vars <- pred.vars[ !pred.vars == "km_BR"] # remove high correlations
+pred.vars <- pred.vars[ !pred.vars == "km_br"] # remove high correlations
+
+# I think launch and side/lat are correlated and need to be eitehr or 
+# factor.vars <- factor.vars[ !factor.vars == "launch2"] # test without launch
+factor.vars <- factor.vars[ !factor.vars == "side"] # test without launch
+# pred.vars <- pred.vars[ !pred.vars == "centlat"] # test without launch
 ```
 
 
@@ -128,6 +224,8 @@ for (i in pred.vars) {
   hist((x), main = paste(i))
   plot((x), main = paste(i))
 }
+
+dat %<>% filter(depth < 600) # removing one observation at 900m
 ```
 
 ## Tranformations
@@ -160,25 +258,6 @@ Aiming for homoscedascit, normal distribution, however avoid transformation wher
     }
     )
   }
-
-  # Make transformations
-  # ASC
-  # dat$log_depth <- log(dat$depth + 1)
-  # dat$PersonID <- as.factor(dat$PersonID)
-  
-  
-  # full_dat$log_depth <- log(full_dat$depth + 1)
-  # full_dat$PersonID <- as.factor(full_dat$PersonID)
-  
-  # Attribute
-  # dat$log_depth <- log(dat$depth + 1)
-  # dat$log_reef <- log(dat$reef + 1)
-  # dat$log_rreef <- log(dat$rreef + 1)
-  # dat$log_lagoon <- log(dat$lagoon + 1)
-  # dat$sqrt_decDuration <- sqrt(dat$decDuration)
-  # dat$sqrt_rug <- sqrt(dat$rug)
-  # dat$log_avid <- log(dat$exTimes12m + 1) 
-  #log_nl_km_br # already in data
   
   # dat$log_lkm_br <- log(dat$l_km_br + 1) # CHARLOTTE
   # dat$log_nlkm_br <- log(dat$nl_km_br + 1) # CHARLOTTE
@@ -186,226 +265,539 @@ Aiming for homoscedascit, normal distribution, however avoid transformation wher
 
 ## Assign pred.vars
 ```{r}
-  # update continous predictors
 # pred.vars <- c("log_depth","log_nlkm_br","pelagic", "log_reef", "log_rreef", "log_lagoon", "sqrt_decDuration", "sqrt_rug", "centroidLat") # CHARLOTTE
-pred.vars <- c("depth", "reefs", "lagoon", "rug", "MedianHour", "centLat") # ASC
 # pred.vars <- c("log_depth","log_nl_km_br", "log_reef", "log_rreef", "log_lagoon", "sqrt_rug", "centLat", "log_avid", "MedianHour") # Attribute
 ```
 
-# Model selection
+## Model selection
   - k is knows determines out wavy we allow the line to be - the higher the knots the smoother and more risk of over fitting: max 5
   - cr is a cubic spline
   - re = random effect
 
-```{r GAMMs}
-# creating  empty lists
+```{r}
+# savedir <- "./models/catch/without_launch" 
+# savedir <- "./models/catch/with_launch" 
+savedir <- "./models/att_catch/with_launch" # attribute
+use.dat <- as.data.frame(dat) 
 out.all <- list()
 var.imp <- list()
-fss.all = list()
-top.all = list()
 
-# test model
-# test_fit <- gam(Dem ~ s(log_depth, k = 3, bs = "cr") + s(PersonID, bs = 're'), family = tw(), data = dat) # CHARLOTTE
-test_fit <- gam(KeptUndam ~ s(depth, k = 3, bs = "cr") + s(facYear, bs = 're'), 
-                offset = decDuration, family = tw(), data = dat) # PhD
-
-# model selection
-model.set <- generate.model.set(use.dat = dat,
-                                test.fit = test_fit,
-                                pred.vars.cont = pred.vars,
-                                pred.vars.fact = factor.vars,
-                                max.predictors = 5,
-                                k = 3,
-                                null.terms = "s(facYear, bs = 're')",
-                                smooth.smooth.interactions = F,
-                                factor.factor.interactions = F,
-                                cov.cutoff =  T)
-
-
-  out.list <- fit.model.set(model.set, max.models = 600, parallel = T)
+for (i in 1:length(resp.vars)) {
+  print(resp.vars[i])
   
-  # saveRDS(out.list, file = "./models/catch/outlist.Rdata")
-  # test <- readRDS("./models/catch/outlist.Rdata")
+  if (is.factor(use.dat[[resp.vars[i]]])) {
+    # If response variable is binary (factor), use binomial distribution
+    dist_family <- binomial()
+  } else {
+    # If response variable is continuous, use tweedie distribution
+    dist_family <- tw()
+  }
+  
+  Model1 <- gam(as.formula(paste(resp.vars[i], "~ s(depth, k = 3, bs='cr') + s(facyear, bs = 're')")), 
+                 offset = decduration, family = dist_family, data = use.dat)
+  
+  model.set <- generate.model.set(use.dat = use.dat,
+                                  test.fit = Model1,
+                                  pred.vars.cont = pred.vars,
+                                  pred.vars.fact = factor.vars,
+                                  max.predictors = 5,
+                                  k = 3,
+                                  null.terms = "s(facyear, bs = 're')",
+                                  smooth.smooth.interactions = FALSE,
+                                  factor.factor.interactions = FALSE,
+                                  cov.cutoff =  TRUE)
+  
+  out.list <- fit.model.set(model.set,
+                            max.models = 600,
+                            parallel = TRUE)
   
   names(out.list)
-  
   out.list$failed.models # examine the list of failed models
+  
   mod.table <- out.list$mod.data.out  # look at the model selection table
   mod.table <- mod.table[order(mod.table$AICc), ]
   mod.table$cumsum.wi <- cumsum(mod.table$wi.AICc)
   out.i   <- mod.table[which(mod.table$delta.AICc <= 2), ]
-  out.all <- c(out.all,list(out.i))
-  var.imp <- c(var.imp,list(out.list$variable.importance$aic$variable.weights.raw)) # Or importance score weighted by r2
+  out.all <- c(out.all, list(out.i))
+  var.imp <- c(var.imp, list(out.list$variable.importance$aic$variable.weights.raw)) #Or importance score weighted by r2
   
   # plot the best models
   # for (m in 1:nrow(out.i)) {
-  #   best.model.name = as.character(out.i$modname[m])
+  #   best.model.name <- as.character(out.i$modname[m])
+  #   png(file = paste(savedir, paste(sim_name, "_", resp.vars[i], "mod_fits.png", sep = "_"), sep = "/"))
   #   if (best.model.name != "null") {
-  #     # par(mfrow = c(3, 1), mar = c(9, 4, 3, 1))
-  #     best.model = out.list$success.models[[best.model.name]]
-  #     plot <- plot(best.model, all.terms = T, pages = 1, residuals = T, pch = 16, shade = TRUE)
-  #     # mtext(side = 2, text = resp.vars[i], outer = F)
-  #     
-  #     pred_plots <- plot[[m]]
-  #     }  
+  #     par(mfrow = c(3, 1), mar = c(9, 4, 3, 1))
+  #     best.model <- out.list$success.models[[best.model.name]]  # something wrong with hoe best.model is defined - cant find in list
+  #     plot(best.model, all.terms = TRUE, pages = 1, residuals = TRUE, pch = 16)
+  #     mtext(side = 2, text = resp.vars[i], outer = FALSE)
+  #   }
+  #   dev.off()
   # }
-  
-  all.mod.fits   <- do.call("rbind",out.all)
-  all.var.imp    <- do.call("rbind",var.imp)
+}
+
+names(out.all) <- resp.vars
+names(var.imp) <- resp.vars
+all.mod.fits   <- do.call("rbind",out.all)
+all.var.imp    <- do.call("rbind",var.imp)
+write.csv(all.mod.fits[ , -2], file = paste(savedir, paste(sim_name, "all.mod.fits.csv", sep = "_"), sep = "/"))
+write.csv(all.var.imp, file = paste(savedir, paste(sim_name, "all.var.imp.csv", sep = "_"), sep = "/"))
+
+# importance plot
+pdf(file = paste0("./models/catch/", sim_name, "_var_importance.pdf"), height=5, width=7, pointsize=10)
+heatmap(all.var.imp, notecex = 0.4, col = colorRampPalette(c("yellow","orange","red"))(30), trace = "none", key.title = "", keysize = 2, notecol = "black", key = T,
+        sepcolor = "black", margins = c(12,14), lhei = c(3,10), lwid = c(3,10), Rowv = NA, Colv = NA, scale = 'column')
+dev.off()
 ```
 
-## Top Model
+## Top models
+Check the top models for each resp and see if they make sense. 
+
+### catch
 ```{r}
-all.var.imp %<>% 
-  as.data.frame() %>% 
-  gather(key = predictor, value = importance) %>%
-  mutate(model = "Catch") %>% 
-  arrange(desc(importance))
+### ASC 
+# without luanch
+# folder <- "catch"
+# launch <- "without_launch"
+# catch_mod <- gam(catch ~
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                   s(reefs, by = side, k = 3, bs = "cr") +
+#                   s(rug, by = side, k = 3, bs = "cr") +
+#                    season +
+#                    side +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
 
-# Plot gg.importance.scores
-  ggplot(all.var.imp, aes(y = reorder(predictor, importance), x = importance, fill = importance)) +
-    geom_col(show.legend = F) +
-    xlab("Importance") +
-    ylab("Predictor") +
-    theme_classic()
-  
-  mod.table[1, "formula"]
-  
-# Make top model
-topmod <- gam(caught_bin ~ 
-              # ASC
-              # s(centLat, k = 3, bs = "cr") +
-              s(MedianHour, by = season, k = 3, bs = "cr") +
-              s(rug, k = 3, bs = "cr") +
-              s(lagoon, k = 3, bs = "cr") +
-              s(reefs, k = 3, bs = "cr") +
-              # s(rug, by = season, k = 3, bs = "cr") +
-              season +
-                
-              # ATRRIBUTE 
-              # s(log_depth, k = 3, bs = "cr") +
-              # s(log_rreef, k = 3, bs = "cr") +
-              # s(log_lagoon, by = season, k = 3, bs = "cr") +
-              # s(log_reef, by = season, k = 3, bs = "cr") +
-              # season +
-                
-              # s(PersonID, bs = 're') +
-              s(facYear, bs = 're'),
-              offset = decDuration,
-              method = "REML",
-              family = binomial(),
-              data = dat)
+# with launch
+# launch <- "with_launch"
+# catch_mod <- gam(catch ~
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                   s(reefs, by = launch2, k = 3, bs = "cr") +
+#                   s(depth, by = launch2, k = 3, bs = "cr") +
+#                    season +
+#                    launch +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
 
-# saveRDS(topmod, file = "./models/catch.rda")
-# topmod <- readRDS("./models/catch.rda")
+#### ATTRIBUTE
+# folder <- "att_catch"
+# launch <- "with_launch"
+# catch_mod <- gam(catch ~
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                   s(reefs, by = launch2, k = 3, bs = "cr") +
+#                   s(depth, by = launch2, k = 3, bs = "cr") +
+#                    season +
+#                    launch2 +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
 
-summary(topmod)
-AIC(topmod)
+
+summary(catch_mod)
+AIC(catch_mod)
 
 par(mfrow = c(2,2)) 
-gam.check(topmod)
+gam.check(catch_mod)
 
-par(mfrow = c(2,3)) 
-plot(topmod, all.terms = TRUE, residuals = TRUE, pch = 16, shade = TRUE)
-```
-
-# Prediction
-```{r}
-full_dat %<>% dplyr::select(-c(p_dem.fit, p_dem.se.fit))
+# Save each plot one by one
+for (i in 1:length(catch_mod$smooth)) {
+    plot(catch_mod, all.terms = TRUE, residuals = TRUE, pch = 16, shade = TRUE, select = i)
+    dev.copy(png, filename = paste0("./models/",folder, "/", launch, "/resp_catch/", sim_name, "_catch_mod_plot_", i, ".png"))
+    dev.off()
+}
 
 # Predict model onto big data
-full_dat <- cbind(full_dat,
-                "p_dem" = predict(topmod, newdata = full_dat, se.fit = T))
-                # "p_dem" = predict(topmod, newdata = full_dat, type = 'response', se.fit = T))
-
-full_dat %<>%
-  mutate(p_dem.fit = round(p_dem.fit), p_dem.se.fit = round(p_dem.se.fit, 2))
+full_dat <- cbind(full_dat, "pred_catch" = predict.gam(catch_mod, newdata = full_dat, se.fit = T, type = "response"))
 
 # Check summary
-summary(full_dat$p_dem.fit)
+summary(full_dat$pred_catch.fit)
 
 ggplot() +
-  geom_histogram(data = full_dat, aes(x = p_dem.fit), fill = "darkturquoise") +
+  geom_histogram(data = full_dat, aes(x = pred_catch.fit), fill = "darkturquoise", bins = 8) +
   xlab("Predicted Catch") +
   ylab("Frequency") +
-  annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
+  # annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
   theme_classic()
-# 
-# a <- full_dat %>% filter(p_dem.fit > 69)
-# a[, c("TripID","gridID_alt","Dem", "p_dem.fit", "centLat", "MedianHour", "lagoon", "log_depth", "facYear")] 
-# 
-# summary(a$p_dem.fit)
-# table(a$p_dem.fit)
-# 
-# a[which(a$p_dem.fit %in% c(19, 27)), ]
+
+grid <- full_dat %>% filter(tripid == 741) %>% st_as_sf() # trip with highest catch rate
+  
+ggplot() +
+  geom_sf(data = grid$asc_geom, aes(fill = grid$pred_catch.fit), lwd = 0.05) +
+  theme_classic()
 ```
 
-## Spatial Predictions
-### Attribute
+### dem
 ```{r}
-# find average fisher
-# n19 <- dat[(dat$gridID_alt %in% '19' & dat$season %in% "Autumn" & dat$TimeOfDay %in% "Midday"),]
-# n19
-# 1275
-#72
+### ASC 
+# without luanch
+# folder <- "catch"
+# launch <- "without_launch"
+# dem_mod <- gam(dem ~
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                   s(reefs, by = side, k = 3, bs = "cr") +
+#                   s(rug, by = side, k = 3, bs = "cr") +
+#                    season +
+#                    side +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
 
-east <- full_dat %>%  filter(Site %in% c("BundegibR", "ExmouthBR")) %>% filter(TripID == 880)
+# with launch
+# launch <- "with_launch"
+# dem_mod <- gam(dem ~
+#                   s(depth, by = launch2, k = 3, bs = "cr") +
+#                   s(lagoon, by = season, k = 3, bs = "cr") +
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                    season +
+#                    launch2 +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
 
-trips <- c(2, 880, 1136, 1353)
+#### ATTRIBUTE
+folder <- "att_catch"
+launch <- "with_launch"
+dem_mod <- gam(dem ~
+                  s(depth, k = 3, bs = "cr") +
+                  s(reefs, by = launch2, k = 3, bs = "cr") +
+                  s(medianhour, by = season, k = 3, bs = "cr") +
+                   season +
+                   launch2 +
+                   s(facyear, bs = 're'),
+                 offset = decduration,
+                 method = "REML",
+                 family = tw(),
+                 data = dat
+                )
 
-grid <- full_dat %>% 
-  filter(TripID == 880) %>%
-  st_as_sf()
+summary(dem_mod)
+AIC(dem_mod)
 
-bigcatch <- grid %>% filter(gridID_alt %in% unique(a$gridID_alt))
+par(mfrow = c(2,2)) 
+gam.check(dem_mod)
 
-points <- full_dat %>% filter(Site %in% c("TantabiddiBR", "CoralBayBR")) %>% distinct(TripID, dat_geom)
+# Save each plot one by one
+for (i in 1:length(dem_mod$smooth)) {
+    plot(dem_mod, all.terms = TRUE, residuals = TRUE, pch = 16, shade = TRUE, select = i)
+    dev.copy(png, filename = paste0("./models/",folder, "/", launch, "/resp_dem/", sim_name, "_dem_mod_plot_", i, ".png"))
+    dev.off()
+}
 
-ggplot()+
-  geom_sf(data = grid$asc_geom, lwd = 0.05)+
-  geom_sf(data = bigcatch$asc_geom, fill = "blue") +
-  geom_sf(data = points$dat_geom, size = 0.25) +
-  theme_classic()
+# Predict model onto big data
+full_dat <- cbind(full_dat, "pred_dem" = predict.gam(dem_mod, newdata = full_dat, se.fit = T, type = "response"))
+
+# Check summary
+summary(full_dat$pred_dem.fit)
 
 ggplot() +
-  geom_sf(data = grid$asc_geom, aes(fill = as.factor(grid$p_dem.fit)), lwd = 0.05) +
-  # scale_fill_distiller(palette = "YlGnBu", direction = 1) +
-  labs(fill = "Demersal\nCatch") +
+  geom_histogram(data = full_dat, aes(x = pred_dem.fit), fill = "darkturquoise", bins = 8) +
+  xlab("Predicted Catch") +
+  ylab("Frequency") +
+  # annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
   theme_classic()
+
+grid <- full_dat %>% filter(tripid == 741) %>% st_as_sf() # trip with highest catch rate
+  
+#ASC
+# ggplot() +
+#   geom_sf(data = grid$asc_geom, aes(fill = grid$pred_dem.fit), lwd = 0.05) +
+#   theme_classic()
 
 ggplot() +
-  geom_sf(data = grid$asc_geom, aes(fill = grid$p_dem.se.fit), lwd = 0.05) +
-  scale_fill_distiller(palette = "YlGnBu", direction = -1) +
-  labs(fill = "Error: Demersal\nCatch") +
+  geom_sf(data = grid$grid_geom, aes(fill = grid$pred_dem.fit), lwd = 0.05) +
   theme_classic()
-
-a <- full_dat[which(full_dat$p_dem.fit > 10), ]
-a
-
-dat %>% group_by(gridID_alt) %>% 
-  summarise(av = mean(CaughtUndam > 0))
-  # summarise(av = mean()) %>% 
-ggplot() +
-  geom_sf(data = dat$asc_geom, aes(fill = as.factor(dat$av)), lwd = 0.05) +
-  # scale_fill_distiller(palette = "YlGnBu", direction = 1) +
-  labs(fill = "Demersal\nCatch") +
-  theme_classic()
-
-
-
 ```
+
+### catch_bin
+```{r}
+### ASC 
+# without luanch
+# folder <- "catch"
+# launch <- "without_launch"
+# catch_bin_mod <- gam(catch_bin ~
+#                   s(medianhour, by = side, k = 3, bs = "cr") +
+#                   s(lagoon, by = side, k = 3, bs = "cr") +
+#                   s(rug, by = season, k = 3, bs = "cr") +
+#                    season +
+#                    side +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = binomial(),
+#                  data = dat
+#                 )
+
+# with launch
+# launch <- "with_launch"
+# catch_bin_mod <- gam(catch_bin ~
+#                   s(medianhour, by = launch2, k = 3, bs = "cr") +
+#                   s(rug, by = launch2, k = 3, bs = "cr") +
+#                   s(reefs, by = season, k = 3, bs = "cr") +
+#                    launch2 +
+#                    season +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = binomial(),
+#                  data = dat
+#                 )
+
+## ATTRIBUTE
+folder <- "att_catch"
+launch <- "with_launch"
+catch_bin_mod <- gam(catch_bin ~
+                  s(depth, by = launch2, k = 3, bs = "cr") +
+                  s(rug, by = launch2, k = 3, bs = "cr") +
+                  s(reefs, by = season, k = 3, bs = "cr") +
+                   launch2 +
+                   season +
+                   s(facyear, bs = 're'),
+                 offset = decduration,
+                 method = "REML",
+                 family = binomial(),
+                 data = dat
+                )
+
+summary(catch_bin_mod)
+AIC(catch_bin_mod)
+
+par(mfrow = c(2,2)) 
+gam.check(catch_bin_mod)
+
+# Store effects plots - check to make sure they make sense
+png(filename = paste0("./models/", folder, "/",launch, "/resp_catch_bin/", sim_name, "_catch_bin_mod_plot.png"), width = 800, height = 600) # Adjust width and height as needed
+plot(catch_bin_mod, trans = plogis, pages = 1, seWithMean = T)
+dev.off() # Close the PNG device
+
+# Predict model onto big data
+full_dat <- cbind(full_dat, "pred_catch_bin" = predict.gam(catch_bin_mod, newdata = full_dat, se.fit = T, type = "response"))
+
+ggplot() +
+  geom_histogram(data = full_dat, aes(x = pred_catch_bin.fit), fill = "darkturquoise", bins = 8) +
+  xlab("Predicted Catch") +
+  ylab("Frequency") +
+  # annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
+  theme_classic()
+
+grid <- full_dat %>% filter(tripid == 741) %>% st_as_sf() # trip with highest catch rate
+  
+# ASC
+# ggplot() +
+#   geom_sf(data = grid$asc_geom, aes(fill = grid$pred_catch_bin.fit), lwd = 0.05) +
+#   theme_classic()
+
+#ATTRIBUTE
+ggplot() +
+  geom_sf(data = grid$grid_geom, aes(fill = grid$pred_catch_bin.fit), lwd = 0.05) +
+  theme_classic()
+```
+
+### dem_bin
+```{r}
+### ASC 
+# without luanch
+# folder <- "catch"
+# launch <- "without_launch"
+# dem_bin_mod <- gam(dem_bin ~
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                   s(centlat, k = 3, bs = "cr") +
+#                   s(reefs, by = season, k = 3, bs = "cr") +
+#                    season +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = binomial(),
+#                  data = dat
+#                 )
+
+# with launch
+# launch <- "with_launch"
+# dem_bin_mod <- gam(dem_bin ~
+#                   s(depth, by = season, k = 3, bs = "cr") +
+#                   s(reefs, by = launch2, k = 3, bs = "cr") +
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                    season +
+#                    launch2 +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = binomial(),
+#                  data = dat
+#                 )
+
+### ATTRIBUTE
+# with luanch
+# folder <- "att_catch"
+# launch <- "with_launch"
+# dem_bin_mod <- gam(dem_bin ~ ## I HAVE NOT RUN THIS MODEL OPTIMAL HAD CENT LAT ALONG WITH LAUNCH WHICH WAS ISTAKE AND IS SHIT ANYWAY
+#                   s(depth, by = season, k = 3, bs = "cr") +
+#                   s(reefs, by = launch2, k = 3, bs = "cr") +
+#                   s(medianhour, by = season, k = 3, bs = "cr") +
+#                    season +
+#                    launch2 +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = binomial(),
+#                  data = dat
+#                 )
+
+
+summary(dem_bin_mod)
+AIC(dem_bin_mod)
+
+par(mfrow = c(2,2)) 
+gam.check(dem_bin_mod)
+
+# Store effects plots - check to make sure they make sense
+png(filename = paste0("./models/catch/", launch, "/resp_dem_bin/", sim_name, "_dem_bin_mod_plot.png"), width = 800, height = 600) # Adjust width and height as needed
+plot(dem_bin_mod, trans = plogis, pages = 1, seWithMean = T)
+dev.off() # Close the PNG device
+
+# Predict model onto big data
+full_dat <- cbind(full_dat, "pred_dem_bin" = predict.gam(dem_bin_mod, newdata = full_dat, se.fit = T, type = "response"))
+
+ggplot() +
+  geom_histogram(data = full_dat, aes(x = pred_dem_bin.fit), fill = "darkturquoise", bins = 8) +
+  xlab("Predicted Catch") +
+  ylab("Frequency") +
+  # annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
+  theme_classic()
+
+grid <- full_dat %>% filter(tripid == 741) %>% st_as_sf() # trip with highest catch rate
+  
+ggplot() +
+  geom_sf(data = grid$asc_geom, aes(fill = grid$pred_dem_bin.fit), lwd = 0.05) +
+  theme_classic()
+```
+
+### av_catch
+```{r}
+### ASC 
+# without luanch
+# folder <- "catch"
+# launch <- "without_launch"
+# av_catch_mod <- gam(av_catch ~
+#                   s(medianhour, k = 3, bs = "cr") +
+#                   s(reefs, by = side, k = 3, bs = "cr") +
+#                   s(rug, by = side, k = 3, bs = "cr") +
+#                    season +
+#                    side +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
+
+# with launch
+# launch <- "with_launch"
+# av_catch_mod <- gam(av_catch ~
+#                   s(medianhour, k = 3, bs = "cr") +
+#                   s(reefs, by = season, k = 3, bs = "cr") +
+#                   s(rug, by = launch2, k = 3, bs = "cr") +
+#                    season +
+#                    launch2 +
+#                    s(facyear, bs = 're'),
+#                  offset = decduration,
+#                  method = "REML",
+#                  family = tw(),
+#                  data = dat
+#                 )
+
+### ATTRIBUTE
+# with luanch
+folder <- "att_catch"
+launch <- "with_launch"
+av_catch_mod <- gam(av_catch ~
+                  s(medianhour, k = 3, bs = "cr") +
+                  s(lagoon, k = 3, bs = "cr") +
+                  s(reefs, by = launch2, k = 3, bs = "cr") +
+                  s(depth, by = launch2, k = 3, bs = "cr") +
+                   launch2 +
+                   s(facyear, bs = 're'),
+                 offset = decduration,
+                 method = "REML",
+                 family = tw(),
+                 data = dat
+                )
+
+summary(av_catch_mod)
+AIC(av_catch_mod)
+
+par(mfrow = c(2,2)) 
+gam.check(av_catch_mod)
+
+# Save each plot one by one
+for (i in 1:length(av_catch_mod$smooth)) {
+    plot(av_catch_mod, all.terms = TRUE, residuals = TRUE, pch = 16, shade = TRUE, select = i)
+    dev.copy(png, filename = paste0("./models/", folder, "/", launch, "/resp_av_catch/", sim_name, "_av_catch_mod_plot_", i, ".png"))
+    dev.off()
+}
+
+# Predict model onto big data
+full_dat <- cbind(full_dat, "pred_av_catch" = predict.gam(av_catch_mod, newdata = full_dat, se.fit = T, type = "response"))
+
+# Check summary
+summary(full_dat$pred_av_catch.fit)
+
+ggplot() +
+  geom_histogram(data = full_dat, aes(x = pred_av_catch.fit), fill = "darkturquoise", bins = 8) +
+  xlab("Predicted Catch") +
+  ylab("Frequency") +
+  # annotate("text", x = 0, y = 10, label = paste0(zeros, "% zeros"), angle = 90) +
+  theme_classic()
+
+grid <- full_dat %>% filter(tripid == 741) %>% st_as_sf() # trip with highest catch rate
+  
+#ASC 
+# ggplot() +
+#   geom_sf(data = grid$asc_geom, aes(fill = grid$pred_av_catch.fit), lwd = 0.05) +
+#   theme_classic()
+
+#Attribute
+ggplot() +
+  geom_sf(data = grid$grid_geom, aes(fill = grid$pred_av_catch.fit), lwd = 0.05) +
+  theme_classic()
+```
+
+## Stata friendly
+```{r}
+# can do this at end to all
+full_dat %<>% 
+  clean_names() %>%  # replacing . with underscore so it is stata friendly
+  mutate_at(vars(starts_with("pred")), round)
+```
+
 # Store
 Need a data set with no geometry for stata
 ## ASC
 ```{r}
-write_csv(full_dat, paste0("./data/02_data/2.3_asc_dat_", sim_name, ".csv")) # ASC
+# dat_rum_df <- full_dat %>% dplyr::select(-c(asc_geom, br_geom, centroid, dat_geom))
+# write_csv(dat_rum_df, paste0("./data/02_data/2.3_asc_dat_", sim_name, ".csv")) # ASC
 
 # ATTRIBUTE
-# grid %<>% dplyr::select(gridid_alt, br_geom, dat_geom, grid_geom) # spatial data to join later
-# saveRDS(grid, "./data/gpkg/att_sp_dat.gpkg")
+grid %<>% dplyr::select(gridid_alt, br_geom, dat_geom, grid_geom) # spatial data to join later
+saveRDS(grid, "./data/gpkg/att_sp_dat.gpkg")
 # 
-# full_dat %<>% dplyr::select(-c(br_geom, dat_geom, grid_geom))
-# write_csv(full_dat, "./data/02_data/2.3_dat_att.csv")
+full_dat %<>% dplyr::select(-c(br_geom, dat_geom, grid_geom))
+write_csv(full_dat, "./data/02_data/2.3_dat_att.csv")
 
 # CHARLOTTE
 # grid %<>% dplyr::select(gridid_alt, br_geom, dat_geom, grid_geom) # spatial data to join later
@@ -414,6 +806,46 @@ write_csv(full_dat, paste0("./data/02_data/2.3_asc_dat_", sim_name, ".csv")) # A
 # full_dat %<>% dplyr::select(-c(br_geom, dat_geom, grid_geom))
 # write_csv(full_dat, "./data/02_data/2.3_dat.csv")
 ```
+
+## GAM ARCHIVE
+This model below makes sense and works in RUM. 
+Things to check:
+- does dem_bin includes all data 
+-
+```{r}
+# dat <- dat %>%
+#   mutate(Dem = ifelse(numYear < 2019, CaughtUndam, Dem)) %>%
+#   mutate(Dem_bin = ifelse(Dem > 0, "1", "0"))
+
+dat %<>% mutate(Dem_bin = as.factor(Dem_bin),
+                launch2 = as.factor(launch2),
+                side = as.factor(side),
+                facYear = as.factor (facYear),
+                lagoon = as.numeric(lagoon), 
+                rug = as.numeric(rug), 
+                depth = as.numeric(depth), 
+                decDuration = as.numeric(decDuartion), 
+                )
+
+dat %<>% filter(depth < 600) # Lets see if this works 
+
+binmod <- gam(Dem_bin ~ 
+              s(lagoon, k = 3, bs = "cr") +
+              s(rug, k = 3, bs = "cr") +
+              s(depth, by = side, k = 3, bs = "cr") +
+                launch2 +
+                side+
+              s(facYear, bs = 're'),
+              # offset = decDuration, # test this with in teh moodel 
+              method = "REML",
+              family = binomial(),
+              data = dat)
+```
+
+
+
+
+
 
 # BRTs
 ## BRT loop
@@ -530,3 +962,129 @@ dem_mph_mod <- dismo::gbm.step(data = dat,
                            step.size = 5,
                            n.trees = 1000)
 ```
+
+
+# ARCHIVE 
+Explore differences between me and jons catch data 
+```{r setup}
+# looks like all zeros
+# ggplot()+
+#   geom_sf(data = full_dat$asc_geom) # full dat has complete grid
+# 
+# 
+# ggplot()+
+  # geom_sf(data = dat$asc_geom, aes(fill = as.factor(dat$CaughtUndam))) # some cels may be mission ig the fisher didnt do demersal fishing
+  # geom_sf (data = full_dat$dat_geom)
+# # 
+# # # # summarise by geom to see spatial variation
+# d <- dat %>% group_by(asc_geom) %>% summarise(caughtsum = sum(CaughtUndam))
+# d <- dat %>% group_by(asc_geom) %>% summarise(caughtav = round(mean(CaughtUndam)))
+# d <- dat %>% group_by(asc_geom) %>% summarise(caughtav = round(median(CaughtUndam)))
+# # # 
+# ggplot()+
+#   geom_sf(data = d$asc_geom, aes(fill = as.factor(d$caughtsum)))
+# # 
+# ggplot()+
+#   geom_sf(data = d$asc_geom, aes(fill = as.factor(d$caughtav)))
+# 
+# 
+# # 
+# # # catch is higher near boat ramps - somethings up 
+# d <- n %>% filter(CaughtUndam > 0)
+# d0 <- dat %>% filter(CaughtUndam == 0)
+# # # 
+# ggplot()+
+# #   # geom_sf(data = d0$dat_geom, colour = "grey") +
+#   geom_sf(data = d$dat_geom, aes(colour = d$CaughtUndam), alpha = 0.5)
+# # 
+# 
+# 
+# # # table(dat$Dem, dat$numYear)
+# # table(dat$CaughtUndam, dat$numYear)
+# # # table(dat$numYear)
+# # # 
+# j <- dat %>% filter(numYear < 2019)
+# n <- dat %>% filter(numYear > 2019)
+# # 
+# # hist(j$CaughtUndam) # good
+# hist(n$CaughtUndam) # good
+# # hist(dat$CaughtUndam) # good
+# 
+# # summary(j$CaughtUndam) # median 10, max 65
+# # table(j$CaughtUndam) # actually only 23 zeros hist looked ggo because of bins
+# # # 
+# summary(n$CaughtUndam) # median 6, max 37
+# table(n$CaughtUndam) # more zeros but not zero inflated
+# # 
+# # hist(n$Dem) # looks good - outlier at 40
+# # summary(n$Dem) # median 3, max 37 
+# # table(n$Dem) # zero inflated - what i expect
+# # 
+# dat <- dat %>%
+#   mutate(Dem2 = ifelse(numYear < 2019, CaughtUndam, Dem)) %>% # adding in jons dat to dem
+#   mutate(Dem_bin2 = ifelse(Dem2 > 0, "1", "0")) %>%
+#   mutate(caught_bin = ifelse(CaughtUndam > 0, "1", "0"))# binary
+# # 
+# hist(dat$Dem2)  # looks good
+# summary(dat$Dem2) # median 8, max 65
+# table(dat$Dem2) # 24 zeros, not inflated with uo to 20 people catch ing upto 8 fish
+# # 
+# # 
+# ggplot()+
+#   geom_bar(data = dat, aes(x = Dem_bin2)) # opposite to wha i would expect - data is telling me more people ctcah demersal sthan dont
+  
+
+# ggplot()+
+#   geom_bar(data = dat, aes(x = caught_bin)) # same unexpected pattern
+# 
+# j %<>%  
+#   mutate(caught_bin = ifelse(CaughtUndam > 0, "1", "0"))# 
+# 
+# ggplot()+
+#   geom_bar(data = j, aes(x = caught_bin)) # same pattern again
+# 
+# 
+# n %<>%  
+#   mutate(caught_bin = ifelse(CaughtUndam > 0, "1", "0"))# 
+# 
+# ggplot()+
+#   geom_bar(data = n, aes(x = caught_bin)) # same pattern again 
+# 
+# ggplot()+
+#   geom_histogram(data = n, aes(x = CaughtUndam))
+# 
+# ggplot()+
+#   geom_histogram(data = n, aes(x = Dem))
+# 
+# ggplot()+
+#   geom_histogram(data = n, aes(x = Dem_bin))
+# 
+# ggplot()+
+#   geom_histogram(data = dat, aes(x = CaughtUndam))
+# 
+# ggplot()+
+#   geom_histogram(data = dat, aes(x = Dem))
+# 
+# ggplot()+
+#   geom_sf(data = dat$asc_geom) +
+#   geom_sf(data = n$dat_geom, aes(colour = n$Dem))
+# 
+# dat[, c("numYear", "CaughtUndam", "caught_bin", "Dem", "Dem_bin")]
+```
+
+there are alot of far away point like pt cloats which only have one observation where they caught 0 fish - this makes it look like you get lower catch the further away you are from the boat ramp, but really a smapling issue, your more likly to meet someone who has caught 10 fish from the poopular place than unpopular.
+
+dat is modeling the data which was actually vistied by a recreator where choice = 1.
+modelling fishers that have been targetting demersals (fishingtype)
+we want to make a catch model which predicts the number of demersal fish caught across our observations
+
+dependent will be dem or dem bin, explanatory variables will be spatial and fisher attributes
+
+
+okay so jon data does not have whetehr they caught demersal/pelagic/nearshore fish etc. he just split his fishers into trolling and demersal So I will go back to modelling all people who targetted demersal na dall the fish they caught. Caught Undam or cuaght undam bin is the dependent var
+
+I think this skews it alot because of all the nearshore fish so im going to have demersal catch and just add all of jon caught undam catch to dem  - this didnt help I still have less zeros than I would expect and catchs up beyond 60., Doing this only gives me 24/339 zeros 
+
+investigate the difference between jon and my data - maybe mine is just really bad
+
+another line of enquiry is the grid - i could make it smaller so the rugosity doesnt take over in the grid with the canyon. 

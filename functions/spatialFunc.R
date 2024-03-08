@@ -645,6 +645,17 @@ mean_depth<-function(bathy, polygon){
   polygon <- st_transform(poly_to_bathy_crs, poly_crs)
 }
 
+#### Depth range ####
+depth_range<-function(bathy, polygon){
+  poly_crs <- crs(polygon) # store polygons original crs
+  bathy_crs <- crs(bathy)  # store raster crs
+  poly_to_bathy_crs <- st_transform(polygon, bathy_crs) # re-project polygon to match raster
+  r.vals <- raster::extract(bathy, poly_to_bathy_crs) #extract values of raster
+  r.min <- unlist(lapply(r.vals, FUN = min)) #take mean for each polygon
+  r.max <- unlist(lapply(r.vals, FUN = max)) #take mean for each polygon
+  poly_to_bathy_crs$depth_range <- r.max - r.min #merge mean back in to polygon
+  polygon <- st_transform(poly_to_bathy_crs, poly_crs)
+}
 #### habitat_area ####
 # habitat_area is a function which calculates the area (km2) of every habitat present within individual grid cells. 
 # To run function you need a 

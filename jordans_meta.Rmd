@@ -1,0 +1,220 @@
+#Jordans meta-analysis data
+
+```{r}
+  rm(list = ls())
+
+# librarys
+   library(tidyverse)
+    library(dplyr)
+    library(ggplot2)
+    library(sp)
+    library(raster)
+    library(rgeos)
+    library(rgdal)
+    library(sf)
+    library(lwgeom)
+    library(googledrive)
+    library(units)
+    library(nngeo)
+    library(magrittr)
+    library(todor)
+    library(stringdist)
+
+# functions
+source("./functions/genFunc.R") # spatial functions
+source("./functions/spatialFunc.R") # spatial functions
+
+# data
+biomass <- read.csv("~/Documents/PhD/Jordans data/Biomass Targeted Effect Sizes 02-12-2020.csv")
+results <- read_csv("~/Documents/PhD/Jordans data/Targeted ES Results 02-12-2020.csv")
+bathy <- raster("./data/raster/bathy250_01.tif") # bathy
+sz_shp <- st_read("~/Documents/PhD/Jordans data/sz_shp_edit.gpkg")
+```
+# Define all URs 
+```{r}
+# setdiff(biomass$unique_reserve, results$unique_reserve)
+# setdiff(results$unique_reserve, biomass$unique_reserve) # This data frame contains all of biomass and extra so can use this
+```
+
+# Filtering shp to results
+```{r}
+# shp <- st_read("~/Documents/PhD/Jordans data/Ben Connectivity Shape File 23-02-2021/capad_2018_marine_edits_WA_FINAL_v2_for_analysis.shp") %>%
+#   st_transform(crs = 4283) %>% #1421
+#   st_make_valid()
+# 
+# # Spatial filter
+# results_shp <- st_as_sf(results, coords = c("long", "lat"), crs = 4283) %>% st_make_valid() 
+# 
+# # ggplot()+
+# #   geom_sf(data = shp, colour = 'red') +
+# #   geom_sf(data = results_shp, size = 0.05)
+# 
+# intersects <- st_intersects(shp, results_shp, sparse = FALSE)
+# intersects <- apply(intersects, 1, any) # Apply the any function row-wise
+# 
+# shp$intersect <- intersects
+# 
+# shp2 <- shp %>% filter(intersects %in% TRUE)
+
+# Filter by marine park name - decided not to as there are inconsistencies that need manual editing
+# # shp2 %<>% filter(STATE %in% results$state) # removes some GBRMPA which are under COM
+# 
+# setdiff(shp2$NAME, results$marine_park) # Rottnest Island is split into individual sanctuary zones
+# setdiff(results$marine_park, shp2$NAME)
+# 
+# # Need to make all SZ in shp at Rottnest in MP "Rottnest Island"
+# 
+# shp2 %<>%
+#   mutate(Comments_NH = ifelse(NAME %in% c("West End", "Salmon-Parker Point", "Armstrong-North Point", "Thomson Bay", "Green Island"), NAME, NA)) %>%
+#   mutate(NAME = ifelse(NAME %in% c("West End", "Salmon-Parker Point", "Armstrong-North Point", "Thomson Bay", "Green Island"), "Rottnest Island", NAME)) %>%
+#   mutate(NAME = ifelse(NAME %in% "Great Barrier Reef Coast", "Great Barrier Reef", NAME)) %>%
+#   mutate(NAME = ifelse(NAME %in% "Lord Howe Island", "Lord Howe", NAME)) %>% 
+#   mutate(NAME = ifelse(NAME %in% "Houtman Abrolhos Reef Observation Areas Notice 1994", "Abrolhos Islands", NAME)) %>% 
+#   mutate(NAME = ifelse(NAME %in% "Aldinga", "Encounter", NAME)) 
+  
+# 
+# setdiff(shp$NAME, results$marine_park) # These can now be filtered
+# setdiff(results$marine_park, shp$NAME)
+
+# shp %<>% filter(str_detect(shp$COMMENTS, "Sanctuary Zone") | str_detect(shp$NAME, "Abrolhos")) # All say SZ in comments except abrolhos which doesnt have any comments
+
+## Try filter based on similarity between COMMENTS and unique_reserve
+# # Compute string distances for unique_reserve and COMMENTS
+# distances_reserve <- stringdist::stringdistmatrix(results$unique_reserve, shp$COMMENTS, method = "jaccard")
+# 
+# # Compute string distances for marine_park and NAME
+# distances_park <- stringdist::stringdistmatrix(results$marine_park, shp$NAME, method = "jaccard")
+# 
+# # Find the best matches for unique_reserve and COMMENTS
+# best_matches_reserve <- apply(distances_reserve, 1, which.min)
+# 
+# # Find the best matches for marine_park and NAME
+# best_matches_park <- apply(distances_park, 1, which.min)
+# 
+# matches_df <- data.frame(
+#   unique_reserve = results$unique_reserve,
+#   comments = shp$COMMENTS[best_matches_reserve],
+#   marine_park = results$marine_park,
+#   name = shp$NAME[best_matches_park],
+#   stringsAsFactors = FALSE
+# )
+# 
+# # write.csv(matches_df, "~/Documents/PhD/Jordans data/matches.csv") # edited manually to have binary match column
+# matches_df <- read_csv("~/Documents/PhD/Jordans data/matches.csv") 
+# 
+# # Create a data frame with 9 rows filled with NA values
+# extra_rows <- data.frame(matrix(NA, nrow = 8, ncol = ncol(matches_df)))
+# names(extra_rows) <- names(matches_df)
+# 
+# # Add the new rows to the original data frame
+# matches_df <- rbind(matches_df, extra_rows)
+# 
+# matches <- matches_df %>% filter(matches_df$match == 1)
+# 
+# # Join 'matches' with 'shp2' based on 'COMMENTS'
+# shp2 <- left_join(shp2, matches, by = c("COMMENTS" = "comments")) # Abrohols north correct
+# 
+# filtered_shp <- shp2[shp2$COMMENTS %in% results$unique_reserve, ] # gives exact match's
+# 
+# shp2 %<>% 
+#   mutate(unique_reserve = ifelse(COMMENTS %in% filtered_shp$COMMENTS, COMMENTS, unique_reserve))
+# 
+# # Fixing Abrolhos mistake 
+# 
+# shp2 %<>% mutate(unique_reserve = ifelse(unique_reserve %in% "North", "Northern.Section", unique_reserve))
+# 
+# 
+# shp2 %<>% dplyr::select(-c("...1", "marine_park", "name", "match")) 
+# 
+# st_write(shp2, "~/Documents/PhD/Jordans data/meta_sz.gpkg") # edited manually to have binary match column
+# 
+# # This still filtered some whcih were needed 
+```
+
+# Manual filter check
+Shp file was manually edited because coded was not working because of inconsistencies and was taking too long. Steps to manually edit:
+- Turned results into a spatial layer
+- Copy unique_reserve from results file 
+- Fine corresponding zone in sz shp file 
+- Paste in unique_reserve 
+
+```{r}
+# shp <- st_read("~/Documents/PhD/Jordans data/sz_shp_edit.gpkg") %>%
+#   st_transform(crs = 4283) %>% #1421
+#   st_make_valid()
+# 
+# setdiff(shp$unique_reserve, results$unique_reserve)
+# setdiff(results$unique_reserve, shp$unique_reserve) 
+```
+
+# Loading in data from QGIS
+```{r}
+shore <- st_read("~/Documents/PhD/Jordans data/sz_shore.gpkg") %>%
+  st_transform(crs = 4283) %>% #1421
+  st_make_valid()
+
+mainland_shore <- st_read("~/Documents/PhD/Jordans data/sz_mainland_shore.gpkg") %>%
+  st_transform(crs = 4283) %>% #1421
+  st_make_valid()
+```
+
+# Shore protection
+```{r}
+shore %<>%
+  mutate(shore =  as.numeric(round(set_units(st_length(geom), km), 2))) %>% 
+  group_by(unique_reserve) %>% 
+  summarise(shore = sum(shore)) %>% 
+  st_drop_geometry() %>% 
+  as.data.frame()
+      
+
+mainland_shore %<>%
+  mutate(mainland_shore =  as.numeric(round(set_units(st_length(geom), km), 2))) %>%
+  group_by(unique_reserve) %>% 
+  summarise(mainland_shore = sum(mainland_shore)) %>% 
+  st_drop_geometry() %>% 
+  as.data.frame()
+```
+
+# Depth range
+```{r}
+sz_shp <- depth_range(bathy, sz_shp)
+
+sz_shp %<>% st_drop_geometry() %>% as.data.frame()
+
+# st_write(sz_shp, "~/Documents/PhD/Jordans data/sz_shp_edit_v2.gpkg")
+```
+
+# Append data
+```{r}
+results %<>% 
+  left_join(shore[, c("shore", "unique_reserve")]) %>% 
+  mutate_at(c('shore'), ~replace_na(.,0))
+
+results %<>% 
+  left_join(mainland_shore[, c("mainland_shore", "unique_reserve")]) %>% 
+  mutate_at(c('mainland_shore'), ~replace_na(.,0))
+
+results %<>% 
+  left_join(sz_shp[, c("depth_range", "unique_reserve")]) 
+
+biomass %<>% 
+  left_join(shore[, c("shore", "unique_reserve")]) %>% 
+  mutate_at(c('shore'), ~replace_na(.,0))
+
+biomass %<>% 
+  left_join(mainland_shore[, c("mainland_shore", "unique_reserve")]) %>% 
+  mutate_at(c('mainland_shore'), ~replace_na(.,0))
+
+biomass %<>% 
+  left_join(sz_shp[, c("depth_range", "unique_reserve")]) 
+```
+
+
+
+```{r}
+write.csv(biomass, "~/Documents/PhD/Jordans data/Biomass Targeted Effect Sizes 02-12-2020_v2.csv", row.names = FALSE)
+
+write.csv(results, "~/Documents/PhD/Jordans data/Targeted ES Results 02-12-2020_v2.csv", row.names = FALSE)
+```
+

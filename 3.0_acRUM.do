@@ -17,7 +17,7 @@
 	local imdir "/Users/23088313/Documents/git_repos/`project'/data/02_data" // import data directory
 	local exdir "/Users/23088313/Documents/git_repos/`project'/data/03_data" // export data directory
 	
-	local sim "sim1" // define simulation
+	local sim "sim3" // define simulation
 	
 	* import delimited "`imdir'/2.1_asc_rum_`sim'.csv" // import data - no catch data
 	import delimited "`imdir'/2.3_asc_dat_`sim'.csv" // import data
@@ -27,6 +27,9 @@
 
 	gen fchoice = choice == 1 // make factors
 	gen fisl_adj = isl_adj == 1 // make factors
+	gen f_pred_dem_bin_fit = pred_dem_bin_fit == 1 // make factor
+	gen f_pred_catch_bin_fit = pred_catch_bin_fit == 1 // make factor	
+	gen log_depth = log(depth)
 	destring *, ignore("NA") replace // change strings to numeric
 	
 /**#Charlottes rum
@@ -90,33 +93,31 @@
 // 	estimates stats fcflt_sp2l fcflt_sp3l fcflt_spgam // fcflt_spgam lowest BIC: 4852.454
 */
 	
-* Final ASC + cost ONLY model uses fcflt_spgam as cost variable, BIC: 4865.4
-/*
+******************** Final ASC + cost ONLY model uses fcflt_spgam as cost variable, BIC: 4865.4
 
+//	asclogit fchoice c.fcflt_spgam [pweight = ipw], case(tripid) alt(gridid_alt) // fuel cost with flat consumption  +  speed (VOTT) calculated with 3l of boat size: - cost parameter, BIC 4865
+//estimates store ascONLY
+//	
+//estimates stats ascONLY
+//
+// ** Store output
+//
+// 	matrix b = e(b)' // store coefficients 
+// 	matrix v = e(V) // store variance-covariance matrix
+//
+// 	* define directory  to store
+//
+// 	cd "/Users/23088313/Documents/git_repos/hamre_NingalooRUM/data/03_data" // define directory to store model outputs in
+//
+// 	putexcel set asc_only.xlsx, replace
+// 	putexcel A2 = matrix(b), rownames
+// 	putexcel B1 = "Vars"
+// 	putexcel C1 = "Coef"
+// 	putexcel set asc_only.xlsx, modify sheet(v)
+// 	putexcel A2 = matrix(v), rownames
+// 	putexcel set asc_only.xlsx, modify sheet(v)
+// 	putexcel A1 = matrix(v), rownames
 
-	asclogit fchoice c.fcflt_spgam [pweight = ipw], case(tripid) alt(gridid_alt) // fuel cost with flat consumption  +  speed (VOTT) calculated with 3l of boat size: - cost parameter
-	estimates store ascONLY
-	
-	estimates stats ascONLY
-
-** Store output
-
-	matrix b = e(b)' // store coefficients 
-	matrix v = e(V) // store variance-covariance matrix
-
-	* define directory  to store
-
-	cd "/Users/23088313/Documents/git_repos/hamre_NingalooRUM/data/03_data" // define directory to store model outputs in
-
-	putexcel set asc_only.xlsx, replace
-	putexcel A2 = matrix(b), rownames
-	putexcel B1 = "Vars"
-	putexcel C1 = "Coef"
-	putexcel set asc_only.xlsx, modify sheet(v)
-	putexcel A2 = matrix(v), rownames
-	putexcel set asc_only.xlsx, modify sheet(v)
-	putexcel A1 = matrix(v), rownames
-*/
 
 **# ASC + site attributes
 
@@ -143,48 +144,127 @@
 	asclogit fchoice c.fcflt_spgam fisl_adj  [pweight = ipw], case(tripid) alt(gridid_alt) // no convergence
 	estimates store ascatt7
 	
-	asclogit fchoice c.fcflt_spgam pfit_dem  [pweight = ipw], case(tripid) alt(gridid_alt) // convergence
+	asclogit fchoice c.fcflt_spgam pfit_dem  [pweight = ipw], case(tripid) alt(gridid_alt) // convergence - but catch negative
 	estimates store ascatt8
-*/
 	
-** Final model with covariates that converge, BIC: 4735.538
+	asclogit fchoice c.fcflt_spgam bl_offdist fcflt_aninc pfit_dem swell [pweight = ipw], case(tripid) alt(gridid_alt) // convergence, BIC: 4735.538 - old model, removing interactions and offshore distance 
+	estimates store ascatt9
+	
+	asclogit fchoice c.fcflt_spgam  pfit_dem swell [pweight = ipw], case(tripid) alt(gridid_alt) // convergences but catch negative
+	estimates store ascatt10
+	
+	asclogit fchoice c.fcflt_spgam  p_demfit [pweight = ipw], case(tripid) alt(gridid_alt) // convergence, but catch is negative - data has a lot of nearshore fish in demersal numbers so model thinks that fishers dont like cathing fish because they spedn ages going offshore to ctach 1 fish when the could stay inshore and catch 20, but these are shit fish. I have tried lots of variations of the ctcah model to tease this out to no avail. Drop this model for now. 
+	
+*/	
 
-// 	asclogit fchoice c.fcflt_spgam bl_offdist fcflt_aninc pfit_dem swell [pweight = ipw], case(tripid) alt(gridid_alt) // convergence, BIC: 4735.538 - old model, removing interactions and offshore distance
-// 	estimates store ascatt
+** Tried  binomial catch and now im getting posotive
+
+	//asclogit fchoice c.fcflt_spgam  fp_demfit [pweight = ipw], case(tripid) alt(gridid_alt) // 7666
+	//estimates store ascatt11
 	
-	asclogit fchoice c.fcflt_spgam  pfit_dem swell [pweight = ipw], case(tripid) alt(gridid_alt) // convergence, BIC: 4867.2
-	estimates store ascatt
+	//asclogit fchoice c.fcflt_spgam  fp_demfit swell [pweight = ipw], case(tripid) alt(gridid_alt) //7663
+	//estimates store ascatt12
 	
-	estimates stats ascatt
+	//asclogit fchoice c.fcflt_spgam  fp_demfit swell fisl_adj[pweight = ipw], case(tripid) alt(gridid_alt) //7663
+	//estimates store ascatt13
+	
+	* cant test any other vars with this catch model because its confounded
+	//estimates stats ascatt11 ascatt12 ascatt13
+	
+	
+** testing different catch models
+
+* catch 
+// 	asclogit fchoice c.fcflt_spgam pred_catch_fit [pweight = ipw], case(tripid) alt(gridid_alt) // - catch, wo/launch : +catch, w/launch
+// 	estimates store ascCM1
+//	
+// 	asclogit fchoice c.fcflt_spgam pred_dem_fit [pweight = ipw], case(tripid) alt(gridid_alt) // - catch, wo/launch : +catch, w/launch
+// 	estimates store ascCM2
+//	
+// 	asclogit fchoice c.fcflt_spgam f_pred_catch_bin_fit [pweight = ipw], case(tripid) alt(gridid_alt) // - catch, wo/launch : +catch, w/launch
+// 	estimates store ascCM3
+//	
+// 	asclogit fchoice c.fcflt_spgam f_pred_dem_bin_fit [pweight = ipw], case(tripid) alt(gridid_alt) // - catch, wo/launch : -catch, w/launch
+// 	estimates store ascCM4
+//	
+// 	asclogit fchoice c.fcflt_spgam pred_av_catch_fit [pweight = ipw], case(tripid) alt(gridid_alt) // + catch, wo/launch : +catch, w/launch
+// 	estimates store ascCM5
+//	
+// 	estimates stats ascCM1 ascCM2 ascCM3 ascCM4 ascCM5
+	
+** av_catch is the only one which isnt -ve, test welafare estimates
+
+* adding vars 
+* wo/launch
+// 	asclogit fchoice c.fcflt_spgam pred_av_catch_fit swell [pweight = ipw], case(tripid) alt(gridid_alt) // + catch TOP ASC vs ATT MODEL FOR CATCH WITHOUT LAUNCH VAR
+// 	estimates store ascCM5
+
+* w launch
+// 	asclogit fchoice c.fcflt_spgam pred_catch_fit swell [pweight = ipw], case(tripid) alt(gridid_alt) // + catch
+// 	estimates store ascCM1
+//	
+// 	asclogit fchoice c.fcflt_spgam pred_dem_fit swell [pweight = ipw], case(tripid) alt(gridid_alt) // + catch
+// 	estimates store ascCM2
+	
+// 	asclogit fchoice c.fcflt_spgam f_pred_catch_bin_fit swell [pweight = ipw], case(tripid) alt(gridid_alt) // + catch, area and island make it -, best AIC testing welfare estimates
+// 	estimates store ascCM3
+	
+// 	asclogit fchoice c.fcflt_spgam pred_av_catch_fit swell [pweight = ipw], case(tripid) alt(gridid_alt) //  + catch, area and island make it -
+// 	estimates store ascCM5
+//	
+// 	estimates stats ascCM1 ascCM2 ascCM3 ascCM5
+
+// asclogit fchoice c.fcflt_spgam pred_av_catch_fit swell arealog [pweight = ipw], case(tripid) alt(gridid_alt) // no convergence
+// estimates store ascCM5
+//
+// asclogit fchoice c.fcflt_spgam pred_av_catch_fit swell fisl_adj [pweight = ipw], case(tripid) alt(gridid_alt) // no convergence
+// estimates store ascCM5
+//
+// estimates stats ascCM5
+	
+********* Final model for binamal catch model 
+
+// asclogit fchoice c.fcflt_spgam  fp_demfit swell [pweight = ipw], case(tripid) alt(gridid_alt) //7663
+// estimates store ascatt12
 	
 	** Store output
 
-	matrix b = e(b)' // store coefficients 
-	matrix v = e(V) // store variance-covariance matrix
+// 	matrix b = e(b)' // store coefficients 
+// 	matrix v = e(V) // store variance-covariance matrix
+//
+// 	* define directory  to store
+//
+// 	cd "/Users/23088313/Documents/git_repos/hamre_NingalooRUM/data/03_data" // define directory to store model outputs in
+//
+// 	putexcel set asc+att.xlsx, replace
+// 	putexcel A2 = matrix(b), rownames
+// 	putexcel B1 = "Vars"
+// 	putexcel C1 = "Coef"
+// 	putexcel set asc+att.xlsx, modify sheet(v)
+// 	putexcel A2 = matrix(v), rownames
+// 	putexcel set asc+att.xlsx, modify sheet(v)
+// 	putexcel A1 = matrix(v), rownames
+	
 
-	* define directory  to store
+**# ATT @ ASC
 
-	cd "/Users/23088313/Documents/git_repos/hamre_NingalooRUM/data/03_data" // define directory to store model outputs in
+// clogit fchoice c.fcflt_spgam  p_demfit swell [pweight = ipw], group(tripid) // convergence, BIC: 9318 
+// 	estimates store attatasc
+//	
+// 	clogit fchoice c.fcflt_spgam  p_demfit swell arealog [pweight = ipw], group(tripid) // convergence, BIC: 8759
+// 	estimates store attatasc
+//	
+// // 	clogit fchoice c.fcflt_spgam  p_demfit swell arealog fisl_adj [pweight = ipw], group(tripid) // island - 
+// // 	estimates store attatasc
 
-	putexcel set asc_att.xlsx, replace
-	putexcel A2 = matrix(b), rownames
-	putexcel B1 = "Vars"
-	putexcel C1 = "Coef"
-	putexcel set asc_att.xlsx, modify sheet(v)
-	putexcel A2 = matrix(v), rownames
-	putexcel set asc_att.xlsx, modify sheet(v)
-	putexcel A1 = matrix(v), rownames
-
-/** Site attributes at ASC scale
-
-	clogit fchoice c.fcflt_spgam  pfit_dem swell [pweight = ipw], group(tripid) // convergence, BIC: 5678.8
+	clogit fchoice c.fcflt_spgam f_pred_catch_bin_fit swell [pweight = ipw], group(tripid) // w launch ctach model 
 	estimates store attatasc
-	
-	estimates stats attatasc
-	
-	
-	** Store output
-
+//	
+// 	estimates stats attatasc
+//	
+//	
+// 	** Store output
+//
 	matrix b = e(b)' // store coefficients 
 	matrix v = e(V) // store variance-covariance matrix
 
@@ -200,7 +280,7 @@
 	putexcel A2 = matrix(v), rownames
 	putexcel set asc_attatasc.xlsx, modify sheet(v)
 	putexcel A1 = matrix(v), rownames
-*/
+
 
 ** Fine scale attribute model
 /*

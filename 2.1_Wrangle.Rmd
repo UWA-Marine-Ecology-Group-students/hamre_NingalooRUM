@@ -52,6 +52,23 @@
 ```
 
 # Joining external data
+# Side/launch/season
+```{r}
+dat %<>%
+  mutate(facYear = as.factor(numYear)) %>% 
+  mutate(side = ifelse(Site %in% c("ExmouthBR", "BundegiBR"), "East", "West")) %>% 
+  mutate(side = as.factor(side)) %>% 
+  mutate(launch2 = ifelse(Site %in% c("ExmouthBR", "BundegiBR"), "G", NA)) %>% 
+  mutate(launch2 = ifelse(Site %in% "TantabiddiBR", "T", launch2)) %>% 
+  mutate(launch2 = ifelse(is.na(launch2), "CB", launch2)) %>% 
+  mutate(launch2 = as.factor(launch2)) %>% 
+  mutate(season = ifelse(TripMonth %in% c("Sep", "Oct"), "Spring", 
+                           ifelse(TripMonth %in% c("Jul", "Aug"), "Winter",
+                                  "Autumn"))) 
+
+```
+
+
 ## Fuel
 ```{r}
 fuel %<>%
@@ -174,6 +191,7 @@ All data filters have to be done before making the choice set.
     dat %<>% 
       filter(ActivityType == "Extractive") %>% # filtering activity
       filter(str_detect(Site, "BR")) %>% 
+      filter(SiteType %in% "Boat") %>% # filtering activity
       filter(!is.na(UseLat), !is.na(UseLong)) %>% # filtering empty coords
       st_as_sf(coords = c("UseLong", "UseLat"), crs = 4283) %>%  ## make sf object
       rename(dat_geom = geometry)
@@ -184,74 +202,41 @@ All data filters have to be done before making the choice set.
       slice(which.max(decDuration)) %>% 
       ungroup() 
     
+    dat <- st_crop(dat, grid) # removing outliers 
+    
       #'[#VALIDATE: TRUE, no duplicated trip IDs)]
       identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
 ```
 
 # Weighting
-Calculating sampling weights for strata: day type, school holiday, boat ramp
-# Weighting
+Following protocol outed in KAP
+
+## Step 5.1: Identify starta to be weighted
+  - boat ramp (no others necessary because on intensive field trip)
+  
+The primary sampling unit (psuid) is a shift am/pm at a specific boat ramp on a specific date where at least one survey was conducted
 ```{r}
-    # prep for getting survey weights
-    # will duplicate rows which are in public and school holiday - changing to school for weighting and removing duplicates
-    dat %<>% left_join(hol, by = c("SurveyDate" = "Date"))
+## Prepping data 
+tot_smpl <- nrow(dat) # total samples
 
-    tmp <- dat[which(duplicated(dat$TripID)), ] %>% dplyr::select(TripID)
+# Append frequency of each starta to data set
+br_freq <- table(dat$Site) %>% as.data.frame() %>% rename(br_freq = Freq)
 
-    dat %<>%  mutate(Holiday = ifelse(dat$TripID %in% tmp$TripID, "school", Holiday)) %>% distinct()
-    
-    dat <- dat %>%
-      mutate(DayType = weekdays(Date_posix, abbreviate = TRUE)) %>% 
-      mutate(DayType = ifelse(DayType %in% c("Sat", "Sun"), "Weekend", "Weekday")) %>%
-      mutate(DayType = ifelse(Holiday %in% "public", "Weekend", DayType)) %>%
-      mutate(Holiday = as.factor(ifelse(Holiday %in% "school", "1", "0"))) %>%
-      unite("psuid", c(SurveyDate, Time, Site), remove = F, sep = " ")
-
-    # calculating nipw weights
-    ## site
-    w_site <- even_nipw(df = dat, psuid = psuid, w_col = "Site") 
-    dat %<>% left_join(w_site[, c("Site", "Site_nipw")])
-    
-    # time
-    w_time <- even_nipw(df = dat, psuid = psuid, w_col = "Time") 
-    dat %<>% left_join(w_time[, c("Time", "Time_nipw")])
-      
-    ## holiday - not balanced
-    # Holidays
-    nhol <- hol %>% filter(Holiday == "school")  %>% nrow() # dates of school holidays in sample year
-    
-    w_hol <- as.data.frame(table(dat$Holiday)) %>% 
-      mutate(target = ifelse(Var1 %in% 0, ((365*4) - nhol)/(365*4), nhol/(365*4))) %>% 
-      mutate(real = Freq/(sum(Freq))) %>% 
-      mutate(ipw = target/real) %>% 
-      mutate(hol_nipw = ipw/(sum(ipw))) %>% 
-      rename(Holiday = Var1)
-    
-    sum(w_hol$hol_nipw)  # checkpoint: == 1 
-    dat %<>% left_join(w_hol[, c("Holiday", "hol_nipw")]) # append
-
-    # DayType
-    wdat <- dat %>% distinct(psuid, .keep_all = TRUE) # filtering to primary sampling units
-    
-    w_daytype <- as.data.frame(table(wdat$DayType)) %>%
-      mutate(target = ifelse(Var1 %in% "Weekend", (4*(2*52))/360, (4*(5*52))/360)) %>%
-      mutate(real = Freq/sum(Freq)) %>% 
-      mutate(ipw = target/real) %>% 
-      mutate(dt_nipw = ipw/sum(ipw)) %>% 
-      rename(DayType = Var1)
-    
-    sum(w_daytype$dt_nipw) # checkpoint: == 1
-    dat %<>% left_join(w_daytype[, c("DayType", "dt_nipw")])  # append
-
-    # overall weight
-    dat %<>% mutate(ipw = Site_nipw + hol_nipw + dt_nipw + Time_nipw) # w_time removed so same as south cpoast
-    
-    # dat %<>% mutate(nipw = ipw/sum(ipw))
-    # 
-    # sum(dat$nipw)
-    
-    rm(hol, w_site, w_time, w_daytype, w_hol, tmp, wdat)
+dat %<>% left_join(br_freq, by = c("Site" = "Var1"))
 ```
+
+## Step 5.2: Calculate inclusion probability
+```{r}
+# Step 5.2a: calulate inclusion probability
+dat %<>%
+  mutate(br_inprob = br_freq/tot_smpl)
+```
+
+## Step 5.3: Calculate IPW
+```{r}
+dat %<>% mutate(ipw = 1/br_inprob)
+```
+
 # Choice set
 ```{r choice set}
   # isolating grid ID to append to dat
@@ -403,8 +388,6 @@ dat %<>%
                                 ifelse(TimeOfDay %in% "Midday", hsws$wspeed_midday,
                                        hsws$wspeed_afternoon)))
 ```
-
-
 # Save output
 ```{r save}
 dat_rum_df <- dat %>% dplyr::select(-c(centroid, br_geom, grid_geom, dat_geom))
