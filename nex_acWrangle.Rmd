@@ -28,6 +28,7 @@ rm(list = ls())
     library(ggmap)
     # remotes::install_github("jlacko/gmapsdistance")
     library(gmapsdistance)
+    library(janitor)
     
     
 
@@ -39,11 +40,11 @@ rm(list = ls())
     # npz <- st_read("./data/gpkg/wha_ntz_no_shore_fishing.gpkg") %>% 
     #   st_transform(crs = 4283) %>% st_make_valid()
     
-    npz <- st_read("./data/gpkg/ntz.gpkg") %>%
-      st_transform(crs = 4283) %>% st_make_valid()
+    # npz <- st_read("./data/gpkg/ntz.gpkg") %>%
+    #   st_transform(crs = 4283) %>% st_make_valid()
     
-    grid_base <- st_read("./data/gpkg/ascBase_v4.gpkg") %>% 
-      st_transform(crs = 4283) %>% st_make_valid()
+    grid_base <- st_read("./data/gpkg/ascBase_v4.gpkg") %>%
+    st_transform(crs = 4283) %>% st_make_valid()
     
     sh_asc_base <- st_read("./data/gpkg/sh_asc_base.gpkg") %>% 
       st_transform(crs = 4283)
@@ -67,11 +68,10 @@ rm(list = ls())
     # mp <- st_read("./data/gpkg/pmmp_4326.gpkg") %>% 
     #   st_transform(crs = 4283)
     
-    coast <- st_read("./data/gpkg/coast.gpkg") %>% 
-      st_transform(crs = 4283) %>% 
-      dplyr::select(geom) %>% 
+    coast <- st_read("./data/gpkg/coast.gpkg") %>%
+      st_transform(crs = 4283) %>%
+      dplyr::select(geom) %>%
       st_make_valid()
-    
     
     hol <- read_csv("./data/RAW/Holidays.csv") %>% 
       mutate(Date = as.Date(Date, format = "%d/%m/%y"))
@@ -122,10 +122,10 @@ rm(list = ls())
     
     sf_use_s2(FALSE)
     
-    ggplot()+
-      geom_sf(data = grid_base) +
-      geom_sf(data = sim, fill = "green") +
-       geom_sf(data = npz, fill = "blue")
+    # ggplot()+
+    #   geom_sf(data = grid_base) +
+    #   geom_sf(data = sim, fill = "green") +
+    #    geom_sf(data = npz, fill = "blue")
    
     
     #### FUNCTION 
@@ -317,6 +317,8 @@ fuel %<>%
   mutate(cost = Average/100)
 
 dat %<>% left_join(fuel[, c("TripMonth", "numYear", "cost")])
+
+rm(fuel)
 ```
 
 ## Boat length
@@ -364,6 +366,8 @@ Predicting as a function of party size to fill NAs
         mutate(ann_inc = ifelse(!is.na(ann_inc_21), ann_inc_21, lm_ann_inc)) %>% 
         mutate(ann_inc = ifelse(is.na(ann_inc), mean(ann_inc, na.rm = T), ann_inc)) %>% 
         mutate(VOTT = round((ann_inc/(38*52))/3, 2))
+      
+      rm(vott)
 ```
 
 ## Boat specs
@@ -411,7 +415,7 @@ dat %<>%
       dat$gam_sp <- as.numeric(gam_sp)
 
 
-rm(fuel, boat2L, boat3L, vott, temp, gam_cons, sp_cons, cons_mod, sp_mod, tmp, bl_mod, lm_ann_inc, boat_perf, gam_sp)
+rm(boat2L, boat3L, temp, gam_cons, sp_cons, cons_mod, sp_mod, tmp, bl_mod, lm_ann_inc, boat_perf, gam_sp)
 ```
 
 # Filtering
@@ -458,7 +462,7 @@ dat %<>%
     
       write.csv(dat, "data/02_data/2.1_filtered_dat.csv")
       
-      rm(hol)
+      rm(hol, grid_base)
 ```
 
 ## Accomodation 
@@ -518,8 +522,6 @@ rm(br_freq, tot_smpl)
 ## b_ex
 ### Make grid
 ```{r}
-g1 <- "b_ex"
-
 b_ex_dat <- dat %>% filter(ActivityType %in% "Extractive" & SiteType %in% "Boat" & str_detect(Site, "BR"))
 # # 
 # b_ex <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = b_ex_dat, from = 0.03, 
@@ -530,7 +532,7 @@ b_ex_dat <- dat %>% filter(ActivityType %in% "Extractive" & SiteType %in% "Boat"
 # 
 # st_write(b_ex, paste0("./data/gpkg/sims/2.1_asc_manual_edit_", g1, "_", sim_name, "_4283.gpkg"), append = FALSE) # need to write with st_write to open in QGISRUMs
 
-   b_ex <- st_read(paste0("./data/gpkg/", g1, "_grid_", sim_name, "_qgis.gpkg")) %>%
+   b_ex <- st_read(paste0("./data/gpkg/","b_ex_grid_", sim_name, "_qgis.gpkg")) %>%
       st_transform(crs = 4283) %>% st_make_valid()
    
 ggplot()+
@@ -556,7 +558,7 @@ ggplot()+
     b_ex %<>% dplyr::select(-contains("gridID_"))
 
 ## Make new gridid_alt col
-    b_ex %<>% mutate(gridid_alt = paste(g1, row_number(), sep = "_"))
+    b_ex %<>% mutate(gridid_alt = paste("b_ex", row_number(), sep = "_"))
 
 ## make binary gridid_col
     for (i in unique(b_ex$gridid_alt)) {
@@ -670,8 +672,6 @@ ggplot()+
 ## b_nex
 ### Make grid
 ```{r}
-g2 <- "b_nex"
-
 b_nex_dat <- dat %>% filter(ActivityType %in% "Non-Extractive" & SiteType %in% "Boat"& str_detect(Site, "BR"))
 
 # b_nex <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = b_nex_dat, from = 0.03, by = 0.02, crs = 4283, vert = FALSE)
@@ -680,7 +680,7 @@ b_nex_dat <- dat %>% filter(ActivityType %in% "Non-Extractive" & SiteType %in% "
 # 
 # st_write(b_nex, paste0("./data/gpkg/sims/2.1_asc_manual_edit_", g2, "_", sim_name, "_4283.gpkg"), append = FALSE) # need to write with st_write to open in QGISRUMs
 
-   b_nex <- st_read(paste0("./data/gpkg/", g2, "_grid_", sim_name, "_qgis.gpkg")) %>%
+   b_nex <- st_read(paste0("./data/gpkg/", "b_nex_grid_", sim_name, "_qgis.gpkg")) %>%
       st_transform(crs = 4283) %>% st_make_valid()
 ```
 
@@ -705,7 +705,7 @@ ggplot()+
     b_nex %<>% dplyr::select(-contains("gridID_"))
 
 ## Make new gridid_alt col
-    b_nex %<>% mutate(gridid_alt = paste(g1, row_number(), sep = "_"))
+    b_nex %<>% mutate(gridid_alt = paste("b_nex", row_number(), sep = "_"))
 
 ## make binary gridid_col
     for (i in unique(b_nex$gridid_alt)) {
@@ -727,8 +727,8 @@ ggplot()+
     b_nex$centroid <- centroid$geom # append centroid to grid 
  # checking centroids are correct
   ggplot() +
-    geom_sf(data = b_nex) +
-      geom_sf(data = b_nex$centroid, size = 0.5, colour = "red") + theme_classic()
+    geom_sf(data = b_nex$geom) +
+    geom_sf(data = b_nex$centroid, size = 0.5, colour = "red") + theme_classic()
   
 ## NON-LINEAR DISTANCE FROM BR TO CENTROID
   # create distance matrix
@@ -809,8 +809,6 @@ ggplot()+
 ## s_ex
 ### Make grids
 ```{r}
-g3 <- "s_ex"
-
 s_ex_dat <- dat %>% filter(ActivityType %in% "Extractive" & SiteType %in% "Shore")
 # there is one island based activity that needs removed
 # 
@@ -850,7 +848,7 @@ s_ex_dat %<>%
 
 # I manually split up the sh_asc_base by sims and sz and remove al tnhat didnt have any point. I took note of the zone and sim_zone for shore fishing
 
-   s_ex_line <- st_read(paste0("./data/gpkg/", g3, "_grid_", sim_name, ".gpkg")) %>%
+   s_ex_line <- st_read(paste0("./data/gpkg/", "s_ex_grid_", sim_name, ".gpkg")) %>%
       st_transform(crs = 4283) %>% st_make_valid()
 ```
 ### Attributes
@@ -863,7 +861,7 @@ s_ex_cent: centroid of buffer
 ```{r}
 # there are two data points which need to be removed becas ethey are fishing in sz 
 
-    s_ex_line %<>% mutate(gridid_alt = paste(g3, row_number(), sep = "_"))
+    s_ex_line %<>% mutate(gridid_alt = paste("s_ex", row_number(), sep = "_"))
 
 # calculating length
     s_ex_line$length <- as.numeric(round(set_units(st_length(s_ex_line), km), 2))
@@ -925,8 +923,6 @@ s_ex_cent: centroid of buffer
 ## s_nex
 ### Make grid
 ```{r}
-g4 <- "s_nex"
-
 s_nex_dat <- dat %>% filter(ActivityType %in% "Non-Extractive" & SiteType %in% "Shore")
 # there is one island based activity that needs removed
 # 
@@ -965,14 +961,14 @@ s_nex_dat %<>%
 
 # I manually split up the sh_asc_base by sims and sz and remove al tnhat didnt have any point. I took note of the zone and sim_zone for shore fishing
 
-   s_nex_line <- st_read(paste0("./data/gpkg/", g4, "_grid_", sim_name, ".gpkg")) %>%
+   s_nex_line <- st_read(paste0("./data/gpkg/", "s_nex_grid_", sim_name, ".gpkg")) %>%
       st_transform(crs = 4283) %>% st_make_valid()
 ```
 
 ### Attributes
 ```{r}
 # there are two data points which need to be removed becas ethey are fishing in sz 
-    s_nex_buff %<>% mutate(gridid_alt = paste(g4, row_number(), sep = "_"))
+    s_nex_buff %<>% mutate(gridid_alt = paste("s_nex", row_number(), sep = "_"))
 
 # calculating length
     # s_nex_line$length <- as.numeric(round(set_units(st_length(s_nex_line), km), 2))
@@ -1038,37 +1034,134 @@ s_nex_dat %<>%
     s_nex_dat %<>% 
       st_join(s_nex_grid, left = T, join = st_intersects) %>% 
       rename(gridid_vis = gridid_alt)
+    
+    rm(b_ex_dist, b_ex_grid, c, centroid, coast, s_ex_cent, s_ex_grid, s_ex_line, s_nex_cent, s_nex_grid, s_nex_line, sh_asc_base, snap_geom, gridid, i, depth_range, dist, st_centroid_within_poly, st_snap_points, b_nex_dist, b_nex_grid)
 ```
 
 
-## Full choice set
+## Expand data
+### Full choice set
+```{r}
+# make data frames
+b_ex_df <- as.data.frame(b_ex)
+b_nex_df <- as.data.frame(b_nex)
+s_ex_df <-  as.data.frame(s_ex_buff)
+s_nex_df <-  as.data.frame(s_nex_buff)
 
+# join
+b_opts <- full_join(b_ex_df, b_nex_df) # boat based choice options
+s_opts <- full_join(s_ex_df, s_nex_df) # shore base choice options
 
+# test joins
+nrow(b_ex_df) + nrow(b_nex_df) == nrow(b_opts)
+nrow(s_ex_df) + nrow(s_nex_df) == nrow(s_opts)
 
-## this needs to be dne after i have made full choice set 
+# join shore and boat options to get full choice set
+cset <- full_join(b_opts, s_opts)
+
+nrow(b_opts) + nrow(s_opts) == nrow(cset)
+
+# make stata friendly
+cset %<>% clean_names() 
+```
+
+### Full data set
+```{r}
+# Make data stata friendly
+    b_ex_dat %<>% clean_names()
+    b_nex_dat %<>% clean_names()
+    s_ex_dat %<>% clean_names()
+    s_nex_dat %<>% clean_names()
+    
+    # select vars you need -> mandatory: TripID, PersonID, gridID_vis, Site, BoatLength  
+    b_ex_dat %<>% 
+      dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    geom_accom, geometry, use_long, use_lat) %>%
+      distinct() %>% 
+      as.data.frame()
+    
+      
+    b_nex_dat %<>% 
+      dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    geom_accom, geometry, use_long, use_lat) %>%
+      distinct() %>% 
+      as.data.frame()
+        
+    s_ex_dat %<>% 
+      dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    geom_accom, geometry, use_long, use_lat) %>%
+      distinct() %>% 
+      as.data.frame()
+            
+    s_nex_dat %<>% 
+      dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    geom_accom, geometry, use_long, use_lat) %>%
+      distinct() %>% 
+      as.data.frame()
+    
+    #'[#VALIDATE: TRUE, there are no unassigned gridIDs]
+    
+    identical((which(is.na(b_ex_dat$gridid_alt) == TRUE)), integer(0)) == TRUE
+    identical((which(is.na(b_nex_dat$gridid_alt) == TRUE)), integer(0)) == TRUE
+    identical((which(is.na(s_ex_dat$gridid_alt) == TRUE)), integer(0)) == TRUE
+    identical((which(is.na(s_nex_dat$gridid_alt) == TRUE)), integer(0)) == TRUE
+    
+    nrow(b_ex_dat) # copying original data test join
+    nrow(b_nex_dat) # copying original data test join
+    nrow(s_ex_dat) # copying original data test join
+    nrow(s_nex_dat) # copying original data test join
+    nrow(b_ex_dat) + nrow(b_nex_dat) + nrow(s_ex_dat) + nrow(s_nex_dat)
+
+    # join all data
+    b_dat <- full_join(b_ex_dat, b_nex_dat)
+    s_dat <- full_join(s_ex_dat, s_nex_dat)
+    
+    # test joins
+    nrow(b_ex_dat) + nrow(b_nex_dat) == nrow(b_dat)
+    nrow(s_ex_dat) + nrow(s_nex_dat) == nrow(s_dat)
+    
+    # Join all data
+    all_dat <- full_join(b_dat, s_dat)
+    
+    nrow(b_dat) + nrow(s_dat) == nrow(all_dat) # test join
+```
+
+### Append data
+```{r}
+# make rum dat
+    rum_dat <- expand_grid(all_dat, cset, .name_repair = "unique")
+    
+    nrow(cset) * nrow(all_dat) == nrow(rum_dat)
+    
+    rum_dat %<>% mutate(to_rm = ifelse(str_detect(gridid_alt, "b_") & boat_access %in% "No", 1, 0)) 
+
+# test expand
+   table(rum_dat$to_rm) # 0: 94806 1: 20952 
+   table(all_dat$boat_access) # No: 97 Yes: 257 
+   (97*nrow(cset)) - (97*nrow(s_opts)) # this should == table(rum_dat$to_rm):1
+   
+# filter data ro remove
+   rum_dat %<>% filter(to_rm == 0) 
+```
+
+## Land distance
+### this needs to be dne after i have made full choice set 
 
 ```{r}
 # CALCULATE LAND DISTANCE 
-# distance from accomodation to boat ramp
-rm(BRtrips, coast, dat, grid_base, npz, sh_asc_base, sim, temp, g1, gridid, i, sim_name, depth_range, st_centroid_within_poly)
+rum_dat %<>% mutate(finish = ifelse(str_detect(gridid_alt, "b_"), geom_br, geom_cent)) 
 
-temp <- expand.grid(b_ex_dat$geom_accom, b_ex$geom_br) %>% rename(accom = Var1, ramp = Var2)
-tempid <- expand.grid(b_ex_dat$TripID, b_ex$gridid_alt) %>% rename(TripID = Var1, gridid_alt = Var2)
-temp <- cbind(temp, tempid) 
-
-# make and start and finish data
-  # right_join(b_ex_dat, by = c("Var1" = "geom_accom")) %>%
-  # left_join(b_ex, by = c("Var2" = "geom_br"))
-# 
-# 
-length(b_ex$geom_br)*length(b_ex_dat$geom_accom)
 
 myKey<-readLines("~/Documents/PhD/g.csv")
 register_google(key = myKey)
 
 Outputs <- gmapsdistance(
-  origin = temp$accom,
-  destination = temp$ramp,
+  origin = rum_dat$geom_accom,
+  destination = rum_dat$finish,
   mode = "driving",
   combinations = "pairwise",
   dep_date = "2024-07-26",
