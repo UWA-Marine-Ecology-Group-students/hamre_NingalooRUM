@@ -25,8 +25,8 @@ library(sf)
 BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
 
 # simulation 
-model <- "asc_attatasc" #'[#NOTE: choose model] 
-sim <- "sim3" #'[#NOTE: choose simulation] 
+model <- "nex" #'[#NOTE: choose model] 
+sim <- "sim4" #'[#NOTE: choose simulation] 
 cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
 
 b <- read_excel(paste0("./data/03_data/", model, ".xlsx")) # coef
@@ -34,9 +34,12 @@ a <- nrow(b) + 2
 v <- read_excel(paste0("./data/03_data/", model, ".xlsx"), sheet = "v", col_names = rep("x", a)) %>% distinct() # covariance cases
 
 # dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim ,"_4283.gpkg")) # for when no data is models eg. catch rate
-dat <- read_csv(paste0("./data/02_data/2.3_asc_dat_", sim, ".csv")) # for when  data is models eg. catch rate
+# dat <- read_csv(paste0("./data/02_data/2.3_asc_dat_", sim, ".csv")) # for when  data is models eg. catch rate
 # dat <- read_csv("./data/02_data/2.3_dat_att.csv") # attribute
 
+# NEX RUMN paper
+dat <- read_csv(paste0("./data/02_data/2.1_nex_", sim, ".csv")) # NEX
+# dat <- read_csv(paste0("./data/02_data/2.1_nex_ex_", sim, ".csv")) # comprable EX for NEX
 
 # plotting data
 # mp <- st_read("./data/gpkg/pmmp_4326.gpkg")
@@ -54,7 +57,7 @@ dat <- read_csv(paste0("./data/02_data/2.3_asc_dat_", sim, ".csv")) # for when  
 
 ```{r rearrange, include = FALSE}
     #'[#VALIDATE: TRUE, check dat has correct number of rows]
-    nrow(dat) == n_distinct(dat$gridID_alt) * n_distinct(dat$TripID)
+    # nrow(dat) == n_distinct(dat$gridID_alt) * n_distinct(dat$TripID) not as simple for nexso doesnt match
 
     # grid <- dat %>% as.data.frame() %>%
     #     distinct(gridID_alt, .keep_all = TRUE) %>% # nrow(grid) == number of available options
@@ -104,21 +107,28 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
 # calculate utility
 # add f_ from binary vars 
 
-dat %<>% rename(f_pred_catch_bin_fit = pred_catch_bin_fit)
+# dat %<>% rename(f_pred_catch_bin_fit = pred_catch_bin_fit)
 
       # define vars used in RUM
+      # bid <- unique(b$cov) 
+
+# FISHING  - think when there are attributes
+      # id_vars <- dat %>% dplyr::select(num_range("gridid_", bid)) # extract grid IDs
+      
+      # bsite <- bid[str_detect(bid, "[a-zA-Z]")] 
+      # # bsite <- c("fcflt_spgam", "p_dem.fit", "swell", "arealog") # temp manual to add factor
+      # site_vars <- dat %>% dplyr::select(contains(bsite)) # extract attributes
+      # 
+      # vars <- c(names(site_vars), names(id_vars)) #'[#NOTE: add factor vars]
+      
+ # turn defined vars into matrix from dat, make sure there is no geometry
+      # rum_matrix <- as.matrix(dat[, vars])
+
+# ASC NEX RUM
+      b %<>% mutate(cov = ifelse(!str_detect(cov, "fc"), paste0("gridid_", cov), cov)) # NEX 
       bid <- unique(b$cov) 
-      id_vars <- dat %>% dplyr::select(num_range("gridid_", bid)) # extract grid IDs
-      
-      bsite <- bid[str_detect(bid, "[a-zA-Z]")] 
-      # bsite <- c("fcflt_spgam", "p_dem.fit", "swell", "arealog") # temp manual to add factor
-      site_vars <- dat %>% dplyr::select(contains(bsite)) # extract attributes
-      
-      vars <- c(names(site_vars), names(id_vars)) #'[#NOTE: add factor vars]
-      
-    # turn defined vars into matrix from dat, make sure there is no geometry
-      rum_matrix <- as.matrix(dat[, vars])
-      
+      rum_matrix <- as.matrix(dat[, bid])
+    
     # create an empty utility matrix
         Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) 
         
@@ -146,72 +156,86 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     probj = exp(Vj)/sum(exp(Vj))
     
 ```{r Probabilities, include = FALSE}
-# Probabilities
+dat %<>%
+  mutate(gridid_int = group_indices(., gridid_alt)) %>% # making id integers
+  mutate(accom_int = group_indices(., accom)) # making id integers
 
+# Probabilities
     Vj <- as.data.table(Vj) # make data.table to save RAM
     cols <- colnames(Vj) # save the names of the draws for later
-    Vj$br <- as.integer(dat$rampid) # run function by BR
-    Vj$ID <- as.integer(dat$gridid_alt) # add gridID_alt for group_by
-    Vj$tc <- dat$nl_fcflt_spgam # add travel cost
+    Vj$br <- as.integer(dat$accom_int) # run function by BR
+    Vj$br <- as.integer(dat$ramp_id) # run function by BR
+    Vj$ID <- as.integer(dat$gridid_int) # add gridID_alt for group_by
+    Vj$cset <- dat$cset # add gridID_alt for group_by
+    Vj$tc <- dat$fcflt_spgam # add travel cost
 
     # Calculate probability of visit and logsums: pre-simulation
     f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)}
 
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # applying probability function to every cell in Vj by boat ramp
-    p <- p[order(br, ID)] # ordering
-    dat %<>% arrange(rampid, gridid_alt) # ordering
+    # applying probability function to every cell in Vj by boat ramp
+    p <- Vj[ , lapply(.SD, f1), by = ID, .SDcols = c(cols)] # applying probability function to every cell in Vj by boat ramp
     
+    # p <- p[order(br, ID)] # ordering
+    # dat %<>% arrange(rampid, gridid_alt) # ordering
+    # dat %<>% arrange(ramp_id, gridid_alt) # ordering
+
     #'[#VALIDATE: TRUE, should be the same so you can append probabilities]
-    table(dat$gridid_alt == p$ID)
-    
-    nrow(dat) == nrow(p) 
-    
+    # table(dat$gridid_alt == p$ID)
+
+    nrow(dat) == nrow(p)
+
     p <- p[ , br := NULL] # remove
     p <- p[ , ID := NULL] # remove
     p <- as.matrix(p)   # make matrix
-    
-    #'[#VALIDATE: TRUE, sum(p(each site from br)) == 1, so sum(p(each site from every         boat ramp)) == #boat ramps]
-    
-    sum(p[,1])
-    n_distinct(dat$rampid)
 
-    # Adds probability statistics (lower ci, median, upper ci) to each row of dat. This is the probability that people will visit site (gridID_alt) pre-simulation. 
+    #'[#VALIDATE: TRUE, sum(p(each site from br)) == 1, so sum(p(each site from every         boat ramp)) == #boat ramps]
+
+    sum(p[,1])
+    n_distinct(dat$ramp_id)
+
+    # Adds probability statistics (lower ci, median, upper ci) to each row of dat. This is the probability that people will visit site (gridID_alt) pre-simulation.
     # Summary stats are calculated across each row in p (rowQuantiles), length == n1
 
     dat$p.mean_base <- rowQuantiles(p, probs = sqrt(0.5)) # lower ci
     dat$p.low_base <- rowQuantiles(p, probs = sqrt(0.025)) # lower ci
-    dat$p.upp_base <- rowQuantiles(p, probs = 1 - sqrt(0.025)) # upper ci 
-    
+    dat$p.upp_base <- rowQuantiles(p, probs = 1 - sqrt(0.025)) # upper ci
+
     # alternatives presented to the person - sum of exp(Vj)
      logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]
-    
-     sum(dat$choice) # should be ntrips
-    n_distinct(dat$personid) # why is there only 4 trips 
-
-    # save output
-    # write.csv(dat, "./ignore/03_data/3.1_basedat.csv")
-    # write.csv(logsum_base, "./ignore/03_data/3.1_logsum_base.csv")
-
-
+     logsum_base <- Vj[ , lapply(.SD, sum), by = ID, .SDcols = cols]    # dat %<>% arrange(ramp_id, gridid_alt) # ordering
 ```
 
 ```{r closures, include = FALSE}
 # Assign closures
-  sz_vars <- dat %>% 
-    dplyr::select(gridid_alt, sz) %>% 
-    filter(sz == 1) %>% 
-    distinct(gridid_alt)
-  
-   ntz <- unique(sz_vars$gridid_alt) 
+  # sz_vars <- dat %>% 
+  #   dplyr::select(gridid_alt, sz) %>% 
+  #   filter(sz == 1) %>% 
+  #   distinct(gridid_alt)
+
+# ntz <- unique(sz_vars$gridid_alt) 
+
+
+## NEX  and NEX EX
+ sz_vars <- dat %>%
+    dplyr::select(gridid_int, zone_rm) %>%
+    filter(zone_rm == 1)  %>%
+    distinct(gridid_int)
+
+   ntz <- unique(sz_vars$gridid_int)
 
 # Calculate probability of visit and logsums: post-simulation
     Vj[Vj$ID %in% ntz, cols] <- 0
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")]
+    p <- Vj[ , lapply(.SD, f1), by = ID, .SDcols = c(cols, "ID")]
     p <- p[order(br, ID)]
-    dat %<>% arrange(rampid, gridid_alt)
-    table(dat$gridid_alt == p$ID) # should all be true
+    # p <- p[order(br, ID)]
+    # dat %<>% arrange(rampid, gridid_alt)
+    dat %<>% arrange(ramp_id, gridid_alt)
+    # table(dat$gridid_alt == p$ID) # should all be true
     
-    logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols] # 18876 trips
+    logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # 18876 trips
+    logsum_sim <- Vj[ , lapply(.SD, sum), by = ID, .SDcols = cols] # 18876 trips
     
     p <- p[ , br := NULL]
     p <- p[ , ID := NULL]
@@ -226,8 +250,13 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 
 # Extract Welfare
 ```{r welfare, include = FALSE}
-# Extracting the welfare impact
-    W <- log(logsum_sim[, -1]) -  log(logsum_base[, -1])
+# Extracting the welfare impact - EX
+    # W <- log(logsum_sim[, -1]) -  log(logsum_base[, -1])
+    # W <- t(W)/mvn_b[ ,1] # length of this does not match n1/mvn_b
+    # W <- t(W)
+
+# NEX
+   W <- log(logsum_sim[, -1]) -  log(logsum_base[, -1])
     W <- t(W)/mvn_b[ ,1] # length of this does not match n1/mvn_b
     W <- t(W)
 
@@ -238,9 +267,12 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
     logsum_sim$w.upp <- rowQuantiles(W, probs = 1 - sqrt(0.025)) # upper ci
     # logsum_sim$upp.ci <- logsum_sim$w.upp - logsum_sim$w.mean
     
-    dat %<>%  mutate(rampid = as.integer(rampid))
+    # dat %<>%  mutate(rampid = as.integer(rampid))
+    dat %<>%  mutate(rampid = as.integer(ramp_id))
   
     dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("rampid" = "br"))
+    
+    # dat %<>% left_join(logsum_sim[ , c("ID", "w.mean", "w.upp", "w.low")], by = c("ID" = "br"))
 
     # # Welfare impact of closure
     W_impact_trip <- logsum_sim %>%
@@ -256,7 +288,7 @@ The probability of a recreator (i) choosing site (j) is the exponential of the t
 
 # save output
   # write.csv(dat, "./ignore/03_data/3.1_Wsimdat.csv")
-  # write.csv(logsum_sim, "./ignore/03_data/3.1_logsum_sim.csv")
+  write.csv(W_impact_trip, paste0("./data/03_data/3.1_trip_impact_", sim, "_", model, ".csv"))
 ```
 ## Annual Impact
 

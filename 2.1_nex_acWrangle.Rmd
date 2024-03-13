@@ -415,7 +415,7 @@ dat %<>%
       dat$gam_sp <- as.numeric(gam_sp)
 
 
-rm(boat2L, boat3L, temp, gam_cons, sp_cons, cons_mod, sp_mod, tmp, bl_mod, lm_ann_inc, boat_perf, gam_sp)
+rm(boat2L, boat3L, temp, gam_cons, sp_cons, cons_mod, tmp, bl_mod, lm_ann_inc, boat_perf, gam_sp)
 ```
 
 # Filtering
@@ -586,13 +586,20 @@ ggplot()+
     geom_sf(data = b_ex) +
       geom_sf(data = b_ex$centroid, size = 0.5, colour = "red") + theme_classic()
     
-  b_ex %<>% filter(!(gridid_alt %in% "b_ex_48"))  # double
+  
+  b_ex %<>% filter(!(gridid_alt %in% "b_ex_48"))  # empty
   
 ## NON-LINEAR DISTANCE FROM BR TO CENTROID
   # create distance matrix from every ramp to every grid
   b_ex_dist <- dist(b_ex$centroid, BRtrips$geometry, BRtrips$RampID, b_ex$gridid_alt) # create distance dataframe
   
-  b_ex_dist %<>% rename(gridid_alt = gridid) # making id cols match
+b_ex_dist %<>%
+  rename(gridid_alt = gridid) %>% 
+  group_by(gridid_alt) %>%
+  mutate(min_nl_km_br = ifelse(nl_km_br == min(nl_km_br), 1, 0)) %>% 
+  arrange(gridid_alt) %>% 
+  ungroup() %>% 
+  filter(min_nl_km_br == 1)
 
   b_ex %<>% left_join(b_ex_dist, by = "gridid_alt") # appending to grid
   
@@ -617,7 +624,7 @@ ggplot()+
   ggplot() +
     geom_sf(data = b_ex$geom_asc) +
     geom_sf(data = b_ex$geom_cent, colour = "red") +
-     geom_sf(data = b_ex$geom_br, colour= "blue")
+    geom_sf(data = b_ex$geom_br, colour= "blue")
   
 ## checking distances
     ggplot(b_ex) +
@@ -662,10 +669,10 @@ ggplot()+
       st_join(b_ex_grid, left = T, join = st_intersects) %>% 
       rename(gridid_vis = gridid_alt)
     
-    b_ex_dat %<>% filter(!is.na(gridid_vis)) 
+    b_ex_dat %<>% filter(!is.na(gridid_vis)) # removes people not in grid e.g. fishing in sz
     
     ggplot() +
-      geom_sf(data = b_ex, aes(fill = as.factor(use_count))) +
+      geom_sf(data = b_ex, aes(fill = as.factor(sz))) +
       geom_sf(data = b_ex_dat, size = 0.5)
 ```
 
@@ -734,7 +741,13 @@ ggplot()+
   # create distance matrix
   b_nex_dist <- dist(b_nex$centroid, BRtrips$geom_br, BRtrips$RampID, b_nex$gridid_alt) # create distance dataframe
   
-  b_nex_dist %<>% rename(gridid_alt = gridid) # making id cols match
+  b_nex_dist %<>%
+  rename(gridid_alt = gridid) %>% 
+  group_by(gridid_alt) %>%
+  mutate(min_nl_km_br = ifelse(nl_km_br == min(nl_km_br), 1, 0)) %>% 
+  arrange(gridid_alt) %>% 
+  ungroup() %>% 
+  filter(min_nl_km_br == 1)
 
   b_nex %<>% left_join(b_nex_dist, by = "gridid_alt") # appending to grid
   
@@ -801,7 +814,7 @@ ggplot()+
       rename(gridid_vis = gridid_alt)
     
     ggplot() +
-      geom_sf(data = b_nex, aes(fill = as.factor(use_count))) +
+      geom_sf(data = b_nex, aes(fill = as.factor(sz))) +
       geom_sf(data = b_nex_dat, size = 0.5)
 ```
 
@@ -918,6 +931,9 @@ s_ex_cent: centroid of buffer
     s_ex_dat %<>% 
       st_join(s_ex_grid, left = T, join = st_intersects) %>% 
       rename(gridid_vis = gridid_alt)
+    
+    ggplot()+
+      geom_sf(data = s_ex_buff, aes(fill = sim_zone))
 ```
 
 ## s_nex
@@ -997,6 +1013,12 @@ s_nex_dat %<>%
      s_nex_cent %<>% 
       rename(geom_cent = geom) %>% # make geom name individual 
        mutate(cent_id = row_number()) # adding id to append to 
+     
+      # there are duplicated geometrys in s_nex_cent
+     nrow(s_nex_buff) == nrow(s_nex_cent) # FALSE
+     duplicated(s_nex_cent$geom_cent) # TRUE
+     
+    s_nex_cent %<>% distinct(geom_cent, .keep_all = TRUE)  # keeping only distinct geometries
        
      s_nex_buff %<>% st_join(s_nex_cent, join = st_intersects) # do st_join
      
@@ -1009,8 +1031,8 @@ s_nex_dat %<>%
      
      ggplot() +
        geom_sf(data = s_nex_buff$geom_asc) + 
-       geom_sf(data = s_nex_buff$geom_cent)
-       geom_sf(data = s_nex_dat, colour = "red")
+       geom_sf(data = s_nex_buff$geom_cent) 
+       # geom_sf(data = s_nex_dat, colour = "red")
        
        # calculate length
        c <- s_nex_buff %>% st_cast("MULTILINESTRING")
@@ -1020,10 +1042,10 @@ s_nex_dat %<>%
        ggplot()+
          geom_sf(data = c, aes(colour = as.factor(length)))
        
-       c %<>% dplyr::select(length)
+       c %<>% as.data.frame() %>% dplyr::select(gridid_alt, length) %>% st_drop_geometry()
        
-       s_nex_buff %<>% st_join(c, join = st_intersects) #
-    
+       s_nex_buff %<>% left_join(c) #
+       
     # isolating grid ID to append to dat
      
   s_nex_grid <- s_nex_buff %>%
@@ -1034,6 +1056,9 @@ s_nex_dat %<>%
     s_nex_dat %<>% 
       st_join(s_nex_grid, left = T, join = st_intersects) %>% 
       rename(gridid_vis = gridid_alt)
+    
+      ggplot()+
+      geom_sf(data = s_nex_buff, aes(fill = sim_zone))
     
     rm(b_ex_dist, b_ex_grid, c, centroid, coast, s_ex_cent, s_ex_grid, s_ex_line, s_nex_cent, s_nex_grid, s_nex_line, sh_asc_base, snap_geom, gridid, i, depth_range, dist, st_centroid_within_poly, st_snap_points, b_nex_dist, b_nex_grid)
 ```
@@ -1077,7 +1102,7 @@ cset %<>% clean_names()
     b_ex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
-                    geom_accom, geometry, use_long, use_lat) %>%
+                    accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
     
@@ -1085,21 +1110,21 @@ cset %<>% clean_names()
     b_nex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
-                    geom_accom, geometry, use_long, use_lat) %>%
+                    accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
         
     s_ex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
-                    geom_accom, geometry, use_long, use_lat) %>%
+                    accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
             
     s_nex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
-                    geom_accom, geometry, use_long, use_lat) %>%
+                    accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
     
@@ -1140,35 +1165,164 @@ cset %<>% clean_names()
     rum_dat %<>% mutate(to_rm = ifelse(str_detect(gridid_alt, "b_") & boat_access %in% "No", 1, 0)) 
 
 # test expand
-   table(rum_dat$to_rm) # 0: 94806 1: 20952 
+   table(rum_dat$to_rm) # 0: 23790 1: 5238 
    table(all_dat$boat_access) # No: 97 Yes: 257 
    (97*nrow(cset)) - (97*nrow(s_opts)) # this should == table(rum_dat$to_rm):1
    
 # filter data ro remove
    rum_dat %<>% filter(to_rm == 0) 
 ```
-
 ## Land distance
-### this needs to be dne after i have made full choice set 
 
 ```{r}
 # CALCULATE LAND DISTANCE 
-rum_dat %<>% mutate(finish = ifelse(str_detect(gridid_alt, "b_"), geom_br, geom_cent)) 
+rum_dat %<>% 
+  mutate(geom_finish = ifelse(str_detect(gridid_alt, "b_"), geom_br, geom_cent)) %>% 
+  mutate(geom_finish = st_as_sfc(geom_finish)) %>% 
+  mutate(finish_id = ifelse(str_detect(gridid_alt, "b_"), ramp_id, gridid_alt)) %>% 
+  mutate(finish_gg = paste0(st_coordinates(geom_finish)[,2], "+", st_coordinates(geom_finish)[,1])) %>% 
+  mutate(accom_gg = paste0(st_coordinates(geom_accom)[,2], "+", st_coordinates(geom_accom)[,1])) 
 
+# land_dists <- rum_dat %>% dplyr::select(accom, finish_id, accom_gg, finish_gg) %>% distinct()
+# 
+# myKey<-readLines("~/Documents/PhD/g.csv")
+# register_google(key = myKey)
+# 
+# Outputs <- gmapsdistance(
+#   origin = land_dists$accom_gg,
+#   destination = land_dists$finish_gg,
+#   mode = "driving",
+#   combinations = "pairwise",
+#   dep_date = "2024-07-26",
+#   dep_time = "06:00:00",
+#   key = myKey)
+# 
+# land_dists$nl_land_km <- Outputs$Distance$Distance/1000
+# land_dists$s_trvltime_mins <- (Outputs$Time$Time/60)
+# land_dists$s_trvltime_min_rnd <- land_dists$s_trvltime_mins*2
 
-myKey<-readLines("~/Documents/PhD/g.csv")
-register_google(key = myKey)
+# write.csv(land_dists, paste0("./data/02_data/2.1_nex_land_dists_", sim_name,".csv"))
+land_dists <- read.csv(paste0("./data/02_data/2.1_nex_land_dists_", sim_name,".csv"))
 
-Outputs <- gmapsdistance(
-  origin = rum_dat$geom_accom,
-  destination = rum_dat$finish,
-  mode = "driving",
-  combinations = "pairwise",
-  dep_date = "2024-07-26",
-  dep_time = "06:00:00",
-  key = myKey)
-
-temp$DistanceLand_km<-Outputs$Distance$Distance/1000
-temp$TravelTimeLand_mins<-Outputs$Time$Time/60
+rum_dat %<>% left_join(land_dists) 
 ```
 
+## Travel cost & choice
+```{r}
+# Choice col
+rum_dat %<>%
+  mutate(b_choice = ifelse(str_detect(gridid_vis, "b_") & 
+                           gridid_vis == gridid_alt & min_nl_km_br == 1, 1, NA)) %>% 
+  mutate(s_choice = ifelse(str_detect(gridid_vis, "s_") & 
+                           gridid_vis == gridid_alt, 1, NA)) %>% 
+  mutate(choice = ifelse(b_choice == 1 | s_choice == 1, 1, NA)) %>% 
+  mutate(choice = ifelse(is.na(choice), 0, choice)) %>% 
+  mutate(choice_fct = as.factor(choice))
+  # choice
+
+    #'[#VALIDATE: TRUE, should equal number of trips]
+    sum(rum_dat$choice) == n_distinct(rum_dat$trip_id)
+
+# Travel cost
+rum_dat %<>%
+        # calc km for shore sites and boat sites
+        mutate(total_km = ifelse(str_detect(gridid_alt, "b_"), nl_km_br + nl_land_km, nl_land_km)) %>% 
+      
+         # fuel cost
+        mutate(fc_flt = round(as.numeric((cost/cons_flt)*total_km), 2)) %>% # calc fuel cost
+        # mutate(fc2l = round(as.numeric((cost/cons2l)*km_BR), 2)) %>%
+        # mutate(fc3l = round(as.numeric((cost/cons3l)*km_BR), 2)) %>%
+        # mutate(fc_gam = round(as.numeric((cost/gam_cons)*km_BR), 2)) %>%
+  
+        # travel time
+        # mutate(trvlTime_flt = round(as.numeric(nl_km_br/sp_flt, 2))) %>%
+        # mutate(trvlTime2l = round(as.numeric(km_BR/sp2l, 2))) %>%
+        # mutate(trvlTime3l = round(as.numeric(km_BR/sp3l), 2)) %>%
+        mutate(b_trvltime_gam = round(as.numeric((nl_km_br/gam_sp)/60), 2)*2) %>% # calc travel time for boat
+        mutate(total_trvltime = ifelse(str_detect(gridid_alt, "b_"), b_trvltime_gam + s_trvltime_min_rnd,
+                                       s_trvltime_min_rnd)) %>% 
+
+        #  trip vott
+        # mutate(trp_vott_flt = round(as.numeric(VOTT*trvlTime_flt), 2)*2) %>%
+        # mutate(trp_vott2l = round(as.numeric(VOTT*trvlTime2l), 2)*2) %>%
+        # mutate(trp_vott3l = round(as.numeric(VOTT*trvlTime3l), 2)*2) %>%
+        mutate(trp_vott_gam = round(as.numeric(vott*total_trvltime), 2)) %>% # policy mod
+
+        # total cost
+        # mutate(tc_flt = round(as.numeric(fc_flt + trp_vott_flt), 2)) %>%
+        # mutate(tc2l = round(as.numeric(fc2l + trp_vott2l), 2)) %>%
+        # mutate(tc3l = round(as.numeric(fc3l + trp_vott3l), 2)) %>% 
+        # mutate(tc_gam = round(as.numeric(fc_gam + trp_vott_gam), 2)) %>% 
+  
+        # mutate(fcflt_sp2l = round(as.numeric(fc_flt + trp_vott2l), 2)) %>% 
+        # mutate(fcflt_sp3l = round(as.numeric(fc_flt + trp_vott3l), 2)) %>% 
+        mutate(fcflt_spgam = round(as.numeric(fc_flt + trp_vott_gam), 2)) ## policy mod
+```
+## Zone
+```{r}
+rum_dat$cset <- substr(rum_dat$gridid_alt, 1, 3) # making choice set col so i can plot them separately
+
+rum_dat %<>% 
+  mutate(b_sz = ifelse(cset %in% c("b_e", "b_n") & sz == 1, 1, 0)) %>% 
+  mutate(s_sz = ifelse(cset %in% c("s_e", "s_n") & sim_zone %in% "sz", 1, 0)) %>% 
+  mutate(sz = ifelse(b_sz == 1 | s_sz == 1, 1, 0)) # this is both current and simn
+
+rum_dat %<>% 
+  mutate(zone_mod = ifelse(str_detect(gridid_alt, "nex") & sz == 1, 1, 0)) # zone for model
+
+rum_dat %<>%
+  mutate(zone_rm = ifelse(str_detect(gridid_alt, "b_ex|s_ex") & sz == 1, 1, 0)) # to remove in sim
+  
+# check - will look really weird - need to rember the choice sets are all combined and the extractiveo ones dont have the current sz in their choice set and if there is no non-extractive activity then i will not be in grid - Current sz which are in the grid are ones that have non extractive sue in them
+# tmp <- rum_dat %>% distinct(gridid_alt, .keep_all = TRUE)
+# 
+# b_tmp <- tmp %>% filter(cset %in% c("b_e", "s_e"))
+# 
+# ggplot()+
+#   geom_sf(data = b_tmp$geom_asc, aes(fill = b_tmp$zone_rm))
+```
+
+# Missing values 
+Check for missing values in important cols 
+Individual id cols e.g., gridid_b_ex_1 have lots of NA where they have appended which should be 0 
+
+- area/length: fine as some sites don't have area they have length and vice versa
+- data_present: is wrong and not needed to will remove
+- 
+
+```{r}
+rum_dat %<>% 
+  mutate(across(contains('gridid_b'), replace_na, 0)) %>% 
+  mutate(across(contains('gridid_s'), replace_na, 0))
+
+# check for NAs
+summary(rum_dat[, c("choice", "choice_fct", "fcflt_spgam", "ipw", "trip_id", "gridid_alt")]) # make sure no NAs
+
+# ipw
+rum_dat[which(is.na(rum_dat$ipw)), ] # just 1 trip id which is allocated to two sites - 
+
+rum_dat %<>% filter(trip_id != 502) 
+
+summary(rum_dat[, c("choice", "choice_fct", "fcflt_spgam", "ipw", "trip_id", "gridid_alt")]) # make sure no NAs
+```
+# Make fishing RUM
+```{r}
+fish_dat <- rum_dat %>% 
+  filter(trip_id %in% b_ex_dat$trip_id) %>% # filter to just the boat based fishing trips
+  filter(cset %in% "b_e")
+```
+
+
+# Save
+```{r save}
+
+rum_dat_no_geom <- rum_dat %>% dplyr::select(-c(geom_accom, geometry, geom_asc, geom_cent, geom_br, geom_finish))
+
+fish_dat_no_geom <- fish_dat %>% dplyr::select(-c(geom_accom, geometry, geom_asc, geom_cent, geom_br, geom_finish))
+
+    write_csv(rum_dat, paste0("./data/02_data/2.1_nex_", sim_name,".csv")) # for 3.1?
+    write_csv(rum_dat_no_geom, paste0("./data/02_data/2.1_nex_", sim_name,"_stata.csv")) # for stata?
+    
+    write_csv(fish_dat, paste0("./data/02_data/2.1_nex_ex_", sim_name,".csv")) # for 3.1?
+    write_csv(fish_dat_no_geom, paste0("./data/02_data/2.1_nex_ex_", sim_name,"_stata.csv")) # for stata?
+```

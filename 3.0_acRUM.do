@@ -17,20 +17,29 @@
 	local imdir "/Users/23088313/Documents/git_repos/`project'/data/02_data" // import data directory
 	local exdir "/Users/23088313/Documents/git_repos/`project'/data/03_data" // export data directory
 	
-	local sim "sim3" // define simulation
+	local sim "sim4" // define simulation
 	
 	* import delimited "`imdir'/2.1_asc_rum_`sim'.csv" // import data - no catch data
-	import delimited "`imdir'/2.3_asc_dat_`sim'.csv" // import data
+	*import delimited "`imdir'/2.1_nex_`sim'_stata.csv"  // import data - nex rum
+	import delimited "`imdir'/2.1_nex_ex_`sim'_stata.csv"  // import data - nex rum data but just fishing grid
+	* import delimited "`imdir'/2.3_asc_dat_`sim'.csv" // import data
 	* import delimited "`imdir'/2.3_dat_att.csv" // import data - attribute model (asc vs att)
 	
 **# data prep
-
+* for all rum
 	gen fchoice = choice == 1 // make factors
+	destring *, ignore("NA") replace // change strings to numeric
+	
+* for asc att rums 
+/*
 	gen fisl_adj = isl_adj == 1 // make factors
 	gen f_pred_dem_bin_fit = pred_dem_bin_fit == 1 // make factor
 	gen f_pred_catch_bin_fit = pred_catch_bin_fit == 1 // make factor	
 	gen log_depth = log(depth)
-	destring *, ignore("NA") replace // change strings to numeric
+*/
+	
+* for nex rum
+	gen fsz = zone_mod == 1 // make factors
 	
 /**#Charlottes rum
 
@@ -257,14 +266,15 @@
 // // 	clogit fchoice c.fcflt_spgam  p_demfit swell arealog fisl_adj [pweight = ipw], group(tripid) // island - 
 // // 	estimates store attatasc
 
-	clogit fchoice c.fcflt_spgam f_pred_catch_bin_fit swell [pweight = ipw], group(tripid) // w launch ctach model 
-	estimates store attatasc
+	*** clogit fchoice c.fcflt_spgam f_pred_catch_bin_fit swell [pweight = ipw], group(tripid) // w launch ctach model 
+	*** estimates store attatasc
 //	
 // 	estimates stats attatasc
 //	
 //	
 // 	** Store output
 //
+/*
 	matrix b = e(b)' // store coefficients 
 	matrix v = e(V) // store variance-covariance matrix
 
@@ -280,6 +290,7 @@
 	putexcel A2 = matrix(v), rownames
 	putexcel set asc_attatasc.xlsx, modify sheet(v)
 	putexcel A1 = matrix(v), rownames
+*/
 
 
 ** Fine scale attribute model
@@ -416,3 +427,55 @@
 	putexcel set attmod_opt.xlsx, modify sheet(v)
 	putexcel A1 = matrix(v), rownames
 */
+
+
+********************** Comprehensive RUM with Non-extractive users
+
+
+/*
+ asclogit fchoice c.fcflt_spgam [pweight = ipw], case(trip_id) alt(gridid_alt) 
+ estimates store nex
+	
+	** Store output
+
+	matrix b = e(b)' // store coefficients 
+ 	matrix v = e(V) // store variance-covariance matrix
+
+ 	* define directory  to store
+
+ 	cd "/Users/23088313/Documents/git_repos/hamre_NingalooRUM/data/03_data" // define directory to store model outputs in
+
+ 	putexcel set nex.xlsx, replace
+ 	putexcel A2 = matrix(b), rownames
+ 	putexcel B1 = "Vars"
+ 	putexcel C1 = "Coef"
+ 	putexcel set nex.xlsx, modify sheet(v)
+ 	putexcel A2 = matrix(v), rownames
+ 	putexcel set nex.xlsx, modify sheet(v)
+ 	putexcel A1 = matrix(v), rownames
+	
+*/
+	
+***** conparable fishing rum to nex rum
+	 asclogit fchoice c.fcflt_spgam [pweight = ipw], case(trip_id) alt(gridid_alt) 
+	estimates store nex_ex
+	
+	** Store output
+
+	matrix b = e(b)' // store coefficients 
+ 	matrix v = e(V) // store variance-covariance matrix
+
+ 	* define directory  to store
+
+ 	cd "/Users/23088313/Documents/git_repos/hamre_NingalooRUM/data/03_data" // define directory to store model outputs in
+
+ 	putexcel set nex_ex.xlsx, replace
+ 	putexcel A2 = matrix(b), rownames
+ 	putexcel B1 = "Vars"
+ 	putexcel C1 = "Coef"
+ 	putexcel set nex_ex.xlsx, modify sheet(v)
+ 	putexcel A2 = matrix(v), rownames
+ 	putexcel set nex_ex.xlsx, modify sheet(v)
+ 	putexcel A1 = matrix(v), rownames
+
+	
