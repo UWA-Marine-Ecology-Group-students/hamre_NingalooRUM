@@ -25,7 +25,7 @@ library(sf)
 BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
 
 # simulation 
-model <- "nex" #'[#NOTE: choose model] 
+model <- "nex_ex" #'[#NOTE: choose model] 
 sim <- "sim4" #'[#NOTE: choose simulation] 
 cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
 
@@ -48,6 +48,9 @@ dat <- read_csv(paste0("./data/02_data/2.1_nex_", sim, ".csv")) # NEX
 
 # source
 # source("./functions/theme.R")
+
+tmp <- dat %>% distinct(gridid_alt, .keep_all = TRUE)
+table(tmp$cset)
 ```
 
 # Wrangle data

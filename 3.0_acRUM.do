@@ -20,8 +20,8 @@
 	local sim "sim4" // define simulation
 	
 	* import delimited "`imdir'/2.1_asc_rum_`sim'.csv" // import data - no catch data
-	*import delimited "`imdir'/2.1_nex_`sim'_stata.csv"  // import data - nex rum
-	import delimited "`imdir'/2.1_nex_ex_`sim'_stata.csv"  // import data - nex rum data but just fishing grid
+	import delimited "`imdir'/2.1_nex_`sim'_stata.csv"  // import data - nex rum
+	*import delimited "`imdir'/2.1_nex_ex_`sim'_stata.csv"  // import data - nex rum data but just fishing grid
 	* import delimited "`imdir'/2.3_asc_dat_`sim'.csv" // import data
 	* import delimited "`imdir'/2.3_dat_att.csv" // import data - attribute model (asc vs att)
 	
@@ -39,7 +39,9 @@
 */
 	
 * for nex rum
-	gen fsz = zone_mod == 1 // make factors
+	gen fn_sz = n_sz == 1 // make factors
+	gen fsn_sz = n_sz == 1 // make factors
+	gen fbn_sz = n_sz == 1 // make factors
 	
 /**#Charlottes rum
 
@@ -457,8 +459,23 @@
 */
 	
 ***** conparable fishing rum to nex rum
-	 asclogit fchoice c.fcflt_spgam [pweight = ipw], case(trip_id) alt(gridid_alt) 
-	estimates store nex_ex
+	asclogit fchoice c.fcflt_spgam [pweight = ipw], case(trip_id) alt(gridid_alt)  // works
+	estimates store no_zone
+	
+	asclogit fchoice c.fcflt_spgam fn_sz [pweight = ipw], case(trip_id) alt(gridid_alt)  // No convergence
+	estimates store nex_sz
+	
+	asclogit fchoice c.fcflt_spgam fsn_sz [pweight = ipw], case(trip_id) alt(gridid_alt)  // No convergence
+	estimates store sn_sz
+	
+	asclogit fchoice c.fcflt_spgam fbn_sz [pweight = ipw], case(trip_id) alt(gridid_alt)  // No convergence
+	estimates store bn_sz
+	
+	estimates stats no_zone nex_sz sn_sz bn_sz
+	
+	
+	**** Nesting
+	nlogit fchoice c.fcflt_spgam [pweight = ipw], case(trip_id) alt(gridid_alt) 
 	
 	** Store output
 

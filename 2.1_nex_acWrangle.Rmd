@@ -1262,24 +1262,29 @@ rum_dat %<>%
 ```{r}
 rum_dat$cset <- substr(rum_dat$gridid_alt, 1, 3) # making choice set col so i can plot them separately
 
+# sz vars to test in model
 rum_dat %<>% 
-  mutate(b_sz = ifelse(cset %in% c("b_e", "b_n") & sz == 1, 1, 0)) %>% 
-  mutate(s_sz = ifelse(cset %in% c("s_e", "s_n") & sim_zone %in% "sz", 1, 0)) %>% 
-  mutate(sz = ifelse(b_sz == 1 | s_sz == 1, 1, 0)) # this is both current and simn
+  mutate(b_sz = ifelse(cset %in% c("b_e", "b_n") & sz == 1, 1, 0)) %>%  # boat based sz
+  mutate(s_sz = ifelse(cset %in% c("s_e", "s_n") & sim_zone %in% "sz", 1, 0)) %>% # shore bases sz
+  mutate(sn_sz = ifelse(cset %in% "s_n" & sim_zone %in% "sz", 1, 0)) %>% # shore based nex sz
+  mutate(bn_sz = ifelse(cset %in% "b_n" & sim_zone %in% "sz", 1, 0)) %>% # boat based nex sz
+  mutate(sz = ifelse(b_sz == 1 | s_sz == 1, 1, 0)) %>% # this is both current and simn
+  mutate(n_sz = ifelse(str_detect(gridid_alt, "nex") & sz == 1, 1, 0)) # nex sz
 
-rum_dat %<>% 
-  mutate(zone_mod = ifelse(str_detect(gridid_alt, "nex") & sz == 1, 1, 0)) # zone for model
-
+# sz var to remov from ex fishing choice
 rum_dat %<>%
   mutate(zone_rm = ifelse(str_detect(gridid_alt, "b_ex|s_ex") & sz == 1, 1, 0)) # to remove in sim
   
 # check - will look really weird - need to rember the choice sets are all combined and the extractiveo ones dont have the current sz in their choice set and if there is no non-extractive activity then i will not be in grid - Current sz which are in the grid are ones that have non extractive sue in them
-# tmp <- rum_dat %>% distinct(gridid_alt, .keep_all = TRUE)
+tmp <- rum_dat %>% distinct(gridid_alt, .keep_all = TRUE)
 # 
 # b_tmp <- tmp %>% filter(cset %in% c("b_e", "s_e"))
 # 
 # ggplot()+
 #   geom_sf(data = b_tmp$geom_asc, aes(fill = b_tmp$zone_rm))
+
+
+# tmp[, c("cset", "gridid_alt", "b_sz", "s_sz", "sn_sz", "bn_sz", "sz", "n_sz", "zone_rm")]
 ```
 
 # Missing values 
