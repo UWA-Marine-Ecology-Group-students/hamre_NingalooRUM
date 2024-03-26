@@ -65,13 +65,16 @@ rm(list = ls())
     
     # bathy <- raster("./data/raster/NWSbathy.tif") # bathy
     
-    # mp <- st_read("./data/gpkg/pmmp_4326.gpkg") %>% 
-    #   st_transform(crs = 4283)
-    
     coast <- st_read("./data/gpkg/coast.gpkg") %>%
       st_transform(crs = 4283) %>%
       dplyr::select(geom) %>%
       st_make_valid()
+    
+    sc_split <- st_read("./data/gpkg/ncmpSplit.gpkg") %>%
+      st_transform(crs = 4283) %>%
+      dplyr::select(geom) %>%
+      st_make_valid()
+    
     
     hol <- read_csv("./data/RAW/Holidays.csv") %>% 
       mutate(Date = as.Date(Date, format = "%d/%m/%y"))
@@ -516,6 +519,10 @@ dat %<>%
 dat %<>% mutate(ipw = 1/br_inprob)
 
 rm(br_freq, tot_smpl)
+
+a <- dat %>% distinct(Site, .keep_all = TRUE)
+
+a[, c("Site", "ipw")]
 ```
 
 # Grids
@@ -603,7 +610,7 @@ b_ex_dist %<>%
 
   b_ex %<>% left_join(b_ex_dist, by = "gridid_alt") # appending to grid
   
-  nrow(b_ex) == n_distinct(b_ex$gridid_alt)*nrow(BRtrips) # check dataset is the correct size
+  nrow(b_ex) == n_distinct(b_ex$gridid_alt)*nrow(BRtrips) # check dataset is the correct size - this is if you want t keep all te BRS
   
 
   ## GRID GEOMETRIES
@@ -657,7 +664,8 @@ b_ex_dist %<>%
 
   # plot should have no zeros and check data to make sure
     ggplot() +
-      geom_sf(data = b_ex, aes(fill = as.factor(use_count)))
+      geom_sf(data = b_ex, aes(fill = as.factor(use_count))) +
+      geom_sf(data = b_ex_dat, size = 0.05)
     
             # isolating grid ID to append to dat
     b_ex_grid <- b_ex %>%
@@ -674,6 +682,48 @@ b_ex_dist %<>%
     ggplot() +
       geom_sf(data = b_ex, aes(fill = as.factor(sz))) +
       geom_sf(data = b_ex_dat, size = 0.5)
+    
+  ## offshore/inshore vraiable
+   # b_ex$inshore <- st_intersects(b_ex, sc_split, sparse = FALSE) # this didnt work so dooing really hacky way until i have time to do it properly
+   # 
+     ggplot()+
+     geom_sf(data = b_ex, aes(fill = gridid_alt))
+   # 
+    offshore <- b_ex %>% 
+     filter(gridid_alt %in% c("b_ex_8", "b_ex_9", "b_ex_10", "b_ex_11", "b_ex_25", "b_ex_12", "b_ex_6", "b_ex_7", "b_ex_56", "b_ex_13", "b_ex_14", "b_ex_15", "b_ex_21", "b_ex_29"))
+    
+   ggplot()+
+     geom_sf(data = b_ex) +
+     geom_sf(data = offshore, fill = "red")
+   
+    b_ex %<>% mutate(offshore = ifelse(gridid_alt %in% offshore$gridid_alt, 1, 0))
+    
+      ggplot()+
+     geom_sf(data = b_ex, aes(fill = offshore))
+    
+    ## EAST/WEST
+    ggplot()+
+      geom_sf(data = b_ex$geom_asc) +
+      geom_sf(data = b_ex$geom_cent) +
+      geom_vline(xintercept = 114.17, color = 'red') +# testing line
+      geom_hline(yintercept = -22.75, color = 'blue') # testing line
+    
+    b_ex %<>% 
+      mutate(cent_lon = st_coordinates(geom_cent)[,1]) %>%
+      mutate(cent_lat = st_coordinates(geom_cent)[,2]) %>%
+      mutate(side = ifelse(cent_lon < 114.17, "w", "e")) 
+    
+    ggplot() +
+      geom_sf(data = b_ex$geom_asc, aes(fill = b_ex$side))
+    
+    b_ex %<>% 
+      mutate(br_site = side) %>% 
+      mutate(br_site = ifelse(br_site %in% "w", "n_w", br_site)) %>% 
+      mutate(br_site = ifelse(cent_lat < -22.75, "s_w", br_site))
+    
+    ggplot() +
+      geom_sf(data = b_ex$geom_asc, aes(fill = b_ex$br_site))
+    
 ```
 
 ## b_nex
@@ -816,6 +866,50 @@ ggplot()+
     ggplot() +
       geom_sf(data = b_nex, aes(fill = as.factor(sz))) +
       geom_sf(data = b_nex_dat, size = 0.5)
+      ## offshore/inshore vraiable
+   # b_ex$inshore <- st_intersects(b_ex, sc_split, sparse = FALSE) # this didnt work so dooing really hacky way until i have time to do it properly
+   # 
+     ggplot()+
+     geom_sf(data = b_nex, aes(fill = gridid_alt))
+   
+    #  ADDING NEW VARS FOR NET TESTING
+     # OFFSHORE
+    
+     offshore <- b_nex %>%
+     filter(gridid_alt %in% c("b_nex_5", "b_nex_15"))
+   #  
+   ggplot()+
+     geom_sf(data = b_nex) +
+     geom_sf(data = offshore, fill = "red")
+   
+    b_nex %<>% mutate(offshore = ifelse(gridid_alt %in% c("b_nex_5", "b_nex_15"), 1, 0))
+    
+     ggplot()+
+     geom_sf(data = b_nex, aes(fill = offshore))
+    
+    ## EAST/WEST
+    ggplot()+
+      geom_sf(data = b_nex$geom_asc) +
+      geom_sf(data = b_nex$geom_cent) +
+      geom_vline(xintercept = 114.17, color = 'red') +# testing line
+      geom_hline(yintercept = -22.75, color = 'blue') # testing line
+    
+    b_nex %<>% 
+      mutate(cent_lon = st_coordinates(geom_cent)[,1]) %>%
+      mutate(cent_lat = st_coordinates(geom_cent)[,2]) %>%
+      mutate(side = ifelse(cent_lon < 114.17, "w", "e")) %>% 
+      mutate(side = ifelse(gridid_alt %in% "b_nex_35", "e", side))
+    
+    ggplot() +
+      geom_sf(data = b_nex$geom_asc, aes(fill = b_nex$side))
+    
+    b_nex %<>% 
+      mutate(br_site = side) %>% 
+      mutate(br_site = ifelse(br_site %in% "w", "n_w", br_site)) %>% 
+      mutate(br_site = ifelse(cent_lat < -22.75, "s_w", br_site))
+    
+    ggplot() +
+      geom_sf(data = b_nex$geom_asc, aes(fill = b_nex$br_site))
 ```
 
 
@@ -934,6 +1028,22 @@ s_ex_cent: centroid of buffer
     
     ggplot()+
       geom_sf(data = s_ex_buff, aes(fill = sim_zone))
+    
+      ## EAST/WEST
+    ggplot()+
+      geom_sf(data = s_ex_buff$geom_asc, aes(fill = s_ex_buff$gridid_alt))
+    
+    s_ex_buff %<>% 
+      mutate(side = ifelse(gridid_alt %in% c("s_ex_1", "s_ex_2", "s_ex_3"), "e", "w")) %>% 
+      mutate(br_site = side) %>% 
+      mutate(br_site = ifelse(br_site %in% "w", "n_w", br_site)) %>% 
+      mutate(br_site = ifelse(gridid_alt %in% "s_ex_8", "s_w", br_site))
+    
+    ggplot() +
+      geom_sf(data = s_ex_buff$geom_asc, aes(fill = s_ex_buff$side))
+    
+    ggplot() +
+      geom_sf(data = s_ex_buff$geom_asc, aes(fill = s_ex_buff$br_site))
 ```
 
 ## s_nex
@@ -1059,6 +1169,23 @@ s_nex_dat %<>%
     
       ggplot()+
       geom_sf(data = s_nex_buff, aes(fill = sim_zone))
+      
+      
+      ## EAST?WEST
+    ggplot()+
+      geom_sf(data = s_nex_buff$geom_asc, aes(fill = s_nex_buff$gridid_alt))
+    
+    s_nex_buff %<>% 
+      mutate(side = ifelse(gridid_alt %in% c("s_nex_1", "s_nex_2", "s_nex_3", "s_nex_4", "s_nex_5", "s_nex_6"), "e", "w")) %>% 
+      mutate(br_site = side) %>% 
+      mutate(br_site = ifelse(br_site %in% "w", "n_w", br_site)) %>% 
+      mutate(br_site = ifelse(gridid_alt %in% c("s_nex_16", "s_nex_19", "s_nex_18", "s_nex_17"), "s_w", br_site))
+    
+    ggplot() +
+      geom_sf(data = s_nex_buff$geom_asc, aes(fill = s_nex_buff$side))
+    
+    ggplot() +
+      geom_sf(data = s_nex_buff$geom_asc, aes(fill = s_nex_buff$br_site))
     
     rm(b_ex_dist, b_ex_grid, c, centroid, coast, s_ex_cent, s_ex_grid, s_ex_line, s_nex_cent, s_nex_grid, s_nex_line, sh_asc_base, snap_geom, gridid, i, depth_range, dist, st_centroid_within_poly, st_snap_points, b_nex_dist, b_nex_grid)
 ```
@@ -1101,7 +1228,7 @@ cset %<>% clean_names()
     # select vars you need -> mandatory: TripID, PersonID, gridID_vis, Site, BoatLength  
     b_ex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
-                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
                     accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
@@ -1109,21 +1236,21 @@ cset %<>% clean_names()
       
     b_nex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
-                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
                     accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
         
     s_ex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
-                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
                     accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
             
     s_nex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
-                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, 
+                    cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
                     accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
@@ -1260,7 +1387,9 @@ rum_dat %<>%
 ```
 ## Zone
 ```{r}
-rum_dat$cset <- substr(rum_dat$gridid_alt, 1, 3) # making choice set col so i can plot them separately
+rum_dat$cset <- substr(rum_dat$gridid_alt, 1, 3) # making choice set col to nest
+rum_dat$b_s_set <- substr(rum_dat$gridid_alt, 1, 1) # making choice set col to nest: try just boat vs shore
+rum_dat$n_e_set <- substr(rum_dat$gridid_alt, 3, 3) # making choice set col to nest: try just ex vs nex
 
 # sz vars to test in model
 rum_dat %<>% 
@@ -1276,12 +1405,16 @@ rum_dat %<>%
   mutate(zone_rm = ifelse(str_detect(gridid_alt, "b_ex|s_ex") & sz == 1, 1, 0)) # to remove in sim
   
 # check - will look really weird - need to rember the choice sets are all combined and the extractiveo ones dont have the current sz in their choice set and if there is no non-extractive activity then i will not be in grid - Current sz which are in the grid are ones that have non extractive sue in them
-tmp <- rum_dat %>% distinct(gridid_alt, .keep_all = TRUE)
+# tmp <- rum_dat %>% distinct(gridid_alt, .keep_all = TRUE)
 # 
 # b_tmp <- tmp %>% filter(cset %in% c("b_e", "s_e"))
 # 
 # ggplot()+
 #   geom_sf(data = b_tmp$geom_asc, aes(fill = b_tmp$zone_rm))
+
+ggplot()+
+  geom_sf(data = b_ex) +
+    geom_sf(data = sc_split, alpha = 0, colour = "red")
 
 
 # tmp[, c("cset", "gridid_alt", "b_sz", "s_sz", "sn_sz", "bn_sz", "sz", "n_sz", "zone_rm")]

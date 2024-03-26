@@ -1,0 +1,113 @@
+nlogit posteestimation
+- calculates choice probabilities 
+- calcaluates logsums 
+
+# Setup
+```{r setup, include = FALSE}
+  rm(list = ls())
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, cache = TRUE, fig.align = 'center', fig.width = 10, fig.height = 7) 
+
+# libraries
+library(tidyverse)
+library(readxl)
+library(magrittr)
+library(MASS)
+library(matrixStats)
+library(dplyr)
+library(data.table)
+library(gtable)
+library(gridExtra)
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+library(sf)
+
+# simulation 
+model <- "nex" #'[#NOTE: choose model] 
+sim <- "sim4" #'[#NOTE: choose simulation] 
+cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
+
+b <- read_excel(paste0("./data/03_data/", model, ".xlsx")) # coefs for model (marginal utilities)
+
+# NEX RUMN paper
+dat <- read_csv(paste0("./data/02_data/2.1_nex_", sim, ".csv")) # NEX
+# dat <- read_csv(paste0("./data/02_data/2.1_nex_ex_", sim, ".csv")) # comprable EX for NEX
+```
+
+# Wrangle data
+The data is in the form of the model output from stata and is formatted like a table. 
+```{r rearrange, include = FALSE}
+b %<>%  
+  rename(cov = "fchoice", 
+         coef = "Coefficient", 
+         stdp = "Std. err.", 
+         z_stat = "z", 
+         p_value = "P>|z|", 
+         lci = "[95% conf. interval]", 
+         uci = "...7") # rename model output table
+
+b %<>% mutate(cov = ifelse(cov == "_cons", lag(cov), cov)) # filling gaps in cov with correct gridid
+b %<>% filter(rowSums(is.na(.)) <= 2) # filter rows you dont need
+b %<>% mutate(cov = ifelse(str_detect(cov, "tau"), substr(cov, 1, 3), cov)) # change name of taus to match dat
+
+asc <- b[2:82,] # isolate ASCs: one less that you would expect because base is missing
+dat %<>% left_join(asc, by = c("gridid_alt" = "cov")) # append ASCs
+dat %<>% mutate_at(vars(coef, lci, uci), ~ ifelse(is.na(.), 0, .))
+
+tau <- b[83:86,] # isolate taus
+tau %<>% 
+  dplyr::select(-c(3:5)) %>% 
+  rename(cset = cov, tau = coef, lci_tau = lci, uci_tau = uci) 
+dat %<>% left_join(tau, by = "cset")  # append taus
+
+dat %<>% mutate(tc = b$coef[1],
+                lci_tc = b$lci[1],
+                uci_tc = b$uci[1]) # appending tc coef to data
+
+# dat[which(dat$trip_id %in% 259), c("cset", "gridid_alt", "coef", "lci", "uci", "tau", "lci_tau", "uci_tau", "tc", "lci_tc", "uci_tc")]
+```
+
+# Testing without error
+```{r}
+dat %<>% mutate(tc_coef = b$Coef[1]) # appending tc coef to data
+dat$vj_tc <- dat$fcflt_spgam * dat$tc_coef # utility of tc
+dat$vj_tot <- dat$vj_tc + dat$Coef # total utility
+
+# Conditional probability
+dat$condp_scale <- dat$vj_tot/dat$tau 
+dat$condp_num <- exp(dat$condp_scale)
+tmp <- dat %>% group_by(trip_id, cset) %>% summarise(condp_dom = sum(condp_num)) %>% ungroup()
+dat %<>% left_join(tmp) 
+dat$condp <- dat$condp_num/dat$condp_dom
+dat$iv <- log(dat$condp_dom)
+
+## P1: probability of choosen nest
+dat$p1_scale <- dat$iv*dat$tau
+# Wnk: THIS IS WHERE YOU WOUDL ADD THE UTILITY FOR VARS THAT DESCRIBE YOUR NEST AND ADD IT TO p1_scale
+# I do not have any in this model
+dat$p1_num <- exp(dat$p1_scale)
+tmp <- dat %>% group_by(trip_id) %>% distinct(p1_num) %>% summarise(p1_dom = sum(p1_num))
+dat %<>% left_join(tmp) 
+dat$p1 <- dat$p1_num/dat$p1_dom
+
+dat$p2 <- dat$condp * dat$p1
+
+## logsum_base
+logsum_base <- log(dat$p1_dom)
+
+## simulation
+dat$vj_sim <- dat$vj_tot
+dat %<>% mutate(vj_sim = ifelse(zone_rm == 1, 0, vj_sim)) 
+
+dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 228:length(dat))]
+```
+
+
+
+
+
+
+
+

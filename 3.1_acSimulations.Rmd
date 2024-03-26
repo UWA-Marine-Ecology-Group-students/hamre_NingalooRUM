@@ -22,16 +22,16 @@ library(sf)
 
 # data
 # BRtrips <- readRDS("./data/gpkg/BRtrips_KR_4283.gpkg") # Korinna Ryans BR estimates
-BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
+# BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
 
 # simulation 
-model <- "nex_ex" #'[#NOTE: choose model] 
+model <- "nex" #'[#NOTE: choose model] 
 sim <- "sim4" #'[#NOTE: choose simulation] 
 cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
 
-b <- read_excel(paste0("./data/03_data/", model, ".xlsx")) # coef
+b <- read_excel(paste0("./data/03_data/", model, ".xlsx")) # coefs for model (marginal utilities)
 a <- nrow(b) + 2
-v <- read_excel(paste0("./data/03_data/", model, ".xlsx"), sheet = "v", col_names = rep("x", a)) %>% distinct() # covariance cases
+v <- read_excel(paste0("./data/03_data/", model, ".xlsx"), sheet = "v", col_names = rep("x", a)) %>% distinct() # covariance matrix for drawing errors from a mutivariate random normal distribution
 
 # dat <- readRDS(paste0("./data/gpkg/sims/2.1_ascCS_rum_", sim ,"_4283.gpkg")) # for when no data is models eg. catch rate
 # dat <- read_csv(paste0("./data/02_data/2.3_asc_dat_", sim, ".csv")) # for when  data is models eg. catch rate
@@ -48,15 +48,11 @@ dat <- read_csv(paste0("./data/02_data/2.1_nex_", sim, ".csv")) # NEX
 
 # source
 # source("./functions/theme.R")
-
-tmp <- dat %>% distinct(gridid_alt, .keep_all = TRUE)
-table(tmp$cset)
 ```
 
 # Wrangle data
-    - dat: contains a row for  (nrow(dat)) = every available option (n grid cells, excluding current sz and sim sz with no recreational value) * per trip (n trips). The choice            column indicated what column the recreator actually chose. 
+dat: contains a row for  (nrow(dat)) = every available option (n grid cells, excluding current sz and sim sz with no recreational value) * per trip (n trips). The choice column indicated what site the recreator actually chose. 
 
-    - b:  
 
 ```{r rearrange, include = FALSE}
     #'[#VALIDATE: TRUE, check dat has correct number of rows]
@@ -99,12 +95,19 @@ dim(mvn_b)[1] == n1 # should be true
 dim(mvn_b)[2] == nrow(b) # should be true
 ```
 
-# Utility
+# Utility matrix
+
+The coef of the logit model gives us the marginal utilities. This is the extra utility an agent receives for one extra unit, given all the other parameters stay constant. 
+
 Calculate the utility (Vj) for every alternative, each individual observation in dat represents an alternative. 
 
-We expect recreator  (i) to choose the site (j) with the highest expected utility. The utility  (Vj) of a site is a function of the observed attributes (B) of those sites and associated error (e).
+We expect recreator  (n) to choose the site (j) with the highest expected utility. The utility  (Vj) of a site is a function of the observed attributes (B) of those sites and associated error (e).
 
-      Vj = B(depth, travel cost etc.) + e 
+      Vnj = Bj + Ej
+
+      Vj = B(depth + travel cost etc.) + e 
+      
+The errors are assumed to follow the generalized extreme value (GEV) distribution type 1 (Gumbel distribution). This distribution is a normal distribution with a slight larger tail on one side. The errors are also assumed to be identical and independently distributed (i.i.d. assumption). This means there cannot be any correlation in the errors. Therefore the site definitions have to have no correlated errors, and therefore have to be different enough that the error don't correlated. If the researcher thinks there is some unobserved correlation in the errors, then the alternatives can be grouped into nests. For example boat fishing and shore fishing and inherently different, therefore you could cluster shore and boat based sites into a boat and shore nest. Doing a nested model relaxes the iid assumption and allows for some correlation within nests, but no correlation between nests. 
 
 ```{r utility, include = FALSE}
 # calculate utility
@@ -115,7 +118,7 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
       # define vars used in RUM
       # bid <- unique(b$cov) 
 
-# FISHING  - think when there are attributes
+# FISHING RUM when there are attributes
       # id_vars <- dat %>% dplyr::select(num_range("gridid_", bid)) # extract grid IDs
       
       # bsite <- bid[str_detect(bid, "[a-zA-Z]")] 
@@ -133,69 +136,96 @@ We expect recreator  (i) to choose the site (j) with the highest expected utilit
       rum_matrix <- as.matrix(dat[, bid])
     
     # create an empty utility matrix
-        Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) 
+        Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1)
         
-    # calculate observed utility for every alternative (nrows), n1 times from
-    # multivariate random normal distribution. %*% is a matrix multiplication where...
-    # We are multiplying the values in the rum_matrix (real data) by the error  
-    # coefficients matrix (mvn_b)? so we have 100 utility values for each variable - why? 
+# calculate observed utility for every alternative (nrows), n1 times from multivariate random normal distribution. We are multiplying the values in the rum_matrix (real data) by the error coefficients matrix (mvn_b)? so we have n1 utility values for each variable. 
     
-      # the code below often fails: non-confromable. This means that you need to check the names in the vectors above to make sure the are the same as the model and mach the data set in teh rught order
+# The loop below often fails: non-confromable. This means that you need to check the names in the vectors above to make sure the are the same as the model and mach the data set in the right order
+        
         for (i in 1:n1) { 
           Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
         }
         
-        Vj <- exp(Vj) # get exponential of utility
+    dat %<>%
+        mutate(gridid_int = group_indices(., gridid_alt),
+         tripid_int = group_indices(., trip_id))  # making id integers    
+        
+        
+    Vj <- as.data.table(Vj) # make data.table to save RAM
+    cols <- colnames(Vj) # save the names of the draws for later
+    Vj$tau <- dat$tau
+    Vj$ID <- as.integer(dat$gridid_int) # run function by BR
+    Vj$tc <- dat$fcflt_spgam # add travel cost
+    Vj$trip_id <- as.integer(dat$trip_id) # add trip id
+    Vj$br <- as.integer(dat$ramp_id) # add trip id
+    
+    nx <- length(Vj) - n1
+    nx <- length(Vj) - nx
+        
+    condp_Vj <- Vj %>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
+    # Vj %<>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
+  
+    ## FOR ALL
+     condp_Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
+     # Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
+    
+        # Vj <- exp(Vj) # get exponential of utility
         
         #'[#VALIDATE: TRUE, exp(Vj) should make all values positive]
-       identical(which( Vj < 0), integer(0))
+       identical(which(Vj < 0), integer(0))
        which(is.infinite(as.matrix(Vj)))
-       
+     
+     identical(which(condp_Vj < 0), integer(0))
+      which(is.infinite(as.matrix(condp_Vj)))
     
+       # data for testing manually   
+       # t <- dat %>% filter(trip_id %in% 259)
+       # t <- t[, c("trip_id", "choice", "fcflt_spgam", "cset", "gridid_alt", "tau")]
+       # t %<>% arrange(gridid_alt)
+       # write.csv(t, "./data/03_data/test.csv")
 ```
+
+# Choice probability
 
 The probability of a recreator (i) choosing site (j) is the exponential of the the utility of the site (j) divided by the sum of the utility of all the potential alternatives the recreator could have choosen (including site j). This is a conditional logit formula. 
 
     probj = exp(Vj)/sum(exp(Vj))
     
-```{r Probabilities, include = FALSE}
-dat %<>%
-  mutate(gridid_int = group_indices(., gridid_alt)) %>% # making id integers
-  mutate(accom_int = group_indices(., accom)) # making id integers
+Conditional choice probability
+We need to use the condition choice probability when doing nested models. This is the probability that the agent choose the bottom level alternative given they choose the nest. 
 
-# Probabilities
-    Vj <- as.data.table(Vj) # make data.table to save RAM
-    cols <- colnames(Vj) # save the names of the draws for later
-    Vj$br <- as.integer(dat$accom_int) # run function by BR
-    Vj$br <- as.integer(dat$ramp_id) # run function by BR
-    Vj$ID <- as.integer(dat$gridid_int) # add gridID_alt for group_by
-    Vj$cset <- dat$cset # add gridID_alt for group_by
-    Vj$tc <- dat$fcflt_spgam # add travel cost
-
+## Pr status quo
+```{r Pr_base, include = FALSE}
     # Calculate probability of visit and logsums: pre-simulation
     f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)}
 
-    p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # applying probability function to every cell in Vj by boat ramp
-    # applying probability function to every cell in Vj by boat ramp
-    p <- Vj[ , lapply(.SD, f1), by = ID, .SDcols = c(cols)] # applying probability function to every cell in Vj by boat ramp
+    p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # applying probability function to every cell in Vj by boat ramp - BOAT BASED RUMS ONLY
+    condp <- condp_Vj[ , lapply(.SD, f1), .SDcols = c(cols)] # applying probability function to every cell in Vj - no groupd when BOAT AND SHORE BASED should be same length as data
+
+    logsum_condp <- condp_Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
+    
+    logsum_condp <- log(logsum_condp[, -1])
+    w <- as.matrix(logsum_condp)
+    logsum_condp$mean_logsum <- rowQuantiles(w, probs = sqrt(0.025)) # lower ci
+    
     
     # p <- p[order(br, ID)] # ordering
-    # dat %<>% arrange(rampid, gridid_alt) # ordering
     # dat %<>% arrange(ramp_id, gridid_alt) # ordering
 
     #'[#VALIDATE: TRUE, should be the same so you can append probabilities]
     # table(dat$gridid_alt == p$ID)
+    # table(dat$gridid_int == p$ID)
 
     nrow(dat) == nrow(p)
 
-    p <- p[ , br := NULL] # remove
+    # p <- p[ , br := NULL] # remove
     p <- p[ , ID := NULL] # remove
     p <- as.matrix(p)   # make matrix
 
     #'[#VALIDATE: TRUE, sum(p(each site from br)) == 1, so sum(p(each site from every         boat ramp)) == #boat ramps]
 
-    sum(p[,1])
-    n_distinct(dat$ramp_id)
+    sum(p[,1]) # the sum of probability shoudl equal 1
+    # n_distinct(dat$ramp_id)
 
     # Adds probability statistics (lower ci, median, upper ci) to each row of dat. This is the probability that people will visit site (gridID_alt) pre-simulation.
     # Summary stats are calculated across each row in p (rowQuantiles), length == n1
@@ -204,12 +234,17 @@ dat %<>%
     dat$p.low_base <- rowQuantiles(p, probs = sqrt(0.025)) # lower ci
     dat$p.upp_base <- rowQuantiles(p, probs = 1 - sqrt(0.025)) # upper ci
 
-    # alternatives presented to the person - sum of exp(Vj)
-     logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]
-     logsum_base <- Vj[ , lapply(.SD, sum), by = ID, .SDcols = cols]    # dat %<>% arrange(ramp_id, gridid_alt) # ordering
+## Prep logsums
+## Sum by boat ramp to scale the trip costs to annual boat ramp visists
+    # logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # BOAT BASED
+
+## MIXED MODE
+## Sum boat and shore based (mixed mode) models by trip id to get a welafre value per person which can be averaged
+    logsum_base <- Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
 ```
 
-```{r closures, include = FALSE}
+## Pr counterfactual
+```{r Pr_sim, include = FALSE}
 # Assign closures
   # sz_vars <- dat %>% 
   #   dplyr::select(gridid_alt, sz) %>% 
@@ -217,7 +252,6 @@ dat %<>%
   #   distinct(gridid_alt)
 
 # ntz <- unique(sz_vars$gridid_alt) 
-
 
 ## NEX  and NEX EX
  sz_vars <- dat %>%
@@ -229,18 +263,15 @@ dat %<>%
 
 # Calculate probability of visit and logsums: post-simulation
     Vj[Vj$ID %in% ntz, cols] <- 0
-    p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")]
-    p <- Vj[ , lapply(.SD, f1), by = ID, .SDcols = c(cols, "ID")]
-    p <- p[order(br, ID)]
+    # p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # BOAT BASED
+    p <- Vj[ , lapply(.SD, f1), .SDcols = c(cols, "ID")] # BOAT AND SHORE
+    
     # p <- p[order(br, ID)]
-    # dat %<>% arrange(rampid, gridid_alt)
-    dat %<>% arrange(ramp_id, gridid_alt)
-    # table(dat$gridid_alt == p$ID) # should all be true
-    
-    logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # 18876 trips
-    logsum_sim <- Vj[ , lapply(.SD, sum), by = ID, .SDcols = cols] # 18876 trips
-    
-    p <- p[ , br := NULL]
+    # dat %<>% arrange(ramp_id, gridid_alt)
+    # table(dat$gridid_alt == p$ID) # should all be tru
+    # table(dat$gridid_int == p$ID) # should all be tru
+    # 
+    # p <- p[ , br := NULL]
     p <- p[ , ID := NULL]
     p <- as.matrix(p)
     
@@ -249,39 +280,53 @@ dat %<>%
     dat$p.mean_sim <- rowQuantiles(p, probs = sqrt(0.5)) # lower ci
     dat$p.low_sim <- rowQuantiles(p, probs = sqrt(0.025)) #saving outputs back to p
     dat$p.upp_sim <- rowQuantiles(p, probs = 1 - sqrt(0.025)) #Note below about weird probs
+    
+    # Sum the utilities by grouping variable
+## BOAT BASED
+## Sum by boat ramp to scale the trip costs to annual boat ramp visists
+    # logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # BOAT BASED
+
+## MIXED MODE
+## Sum boat and shore based (mixed mode) models by trip id to get a welafre value per person which can be averaged
+    logsum_sim <- Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
 ```
 
 # Extract Welfare
+To estimate the change in welfare you need to log the denominator (sum(exp(utility of all alts)) of the probability function and divide by the travel cost.
+
+welfare = log(sum(exp(utility of all alts)))/tc
+
+welfare with a nested logit = log(sum(exp(utility of all alts/tau)))/tc
+
 ```{r welfare, include = FALSE}
-# Extracting the welfare impact - EX
-    # W <- log(logsum_sim[, -1]) -  log(logsum_base[, -1])
-    # W <- t(W)/mvn_b[ ,1] # length of this does not match n1/mvn_b
-    # W <- t(W)
-
-# NEX
-   W <- log(logsum_sim[, -1]) -  log(logsum_base[, -1])
-    W <- t(W)/mvn_b[ ,1] # length of this does not match n1/mvn_b
-    W <- t(W)
-
+# Extracting the welfare impact
+    W <- log(logsum_sim[, -1]) -  log(logsum_base[, -1]) # always subtract the status quo by the counterfactual (simulation)
+    W <- t(W)/mvn_b[ ,1] # divide the logsums by the travel cost (need to pivot to do this t())
+    W <- t(W) # pivot back to original orientation
+    
 # Summaries across draws
     W <- as.matrix(W)
     logsum_sim$w.mean <- rowQuantiles(W, probs = sqrt(0.5)) # median
     logsum_sim$w.low <- rowQuantiles(W, probs = sqrt(0.025)) # lower ci
     logsum_sim$w.upp <- rowQuantiles(W, probs = 1 - sqrt(0.025)) # upper ci
-    # logsum_sim$upp.ci <- logsum_sim$w.upp - logsum_sim$w.mean
     
     # dat %<>%  mutate(rampid = as.integer(rampid))
-    dat %<>%  mutate(rampid = as.integer(ramp_id))
-  
-    dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("rampid" = "br"))
+    # dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("ramp_id" = "br")) # BOAT
     
-    # dat %<>% left_join(logsum_sim[ , c("ID", "w.mean", "w.upp", "w.low")], by = c("ID" = "br"))
+    dat %<>% left_join(logsum_sim[ , c("trip_id", "w.mean", "w.upp", "w.low")]) # MIXED MODE
 
-    # # Welfare impact of closure
+    # # Welfare impact of closure 
+    # BOAT BASED - you sum to get the total welafre impact acorss all boat ramps
+    # W_impact_trip <- logsum_sim %>%
+    #   summarise("w.low.trip ($)" = round(sum(w.low), 2),
+    #             "w.mean.trip ($)" = round(sum(w.mean), 2),
+    #             "w.ipp.trip ($)" = round(sum(w.upp), 2))
+
+    # MIXED MODE - you average to get the average trip impact across all individuals
     W_impact_trip <- logsum_sim %>%
-      summarise("Annual lower welfare impact per trip ($)" = round(sum(w.low), 2),
-                "Annual mean welfare impact per trip ($)" = round(sum(w.mean), 2),
-                "Annual upper welfare impact per trip ($)" = round(sum(w.upp), 2))
+      summarise("w.low.trip ($)" = round(mean(w.low), 2),
+                "w.mean.trip ($)" = round(mean(w.mean), 2),
+                "w.upp.trip ($)" = round(mean(w.upp), 2))
 
     W_impact_trip
     # png("./plots/ASC RUM/ac_sim_og_impact_trip.png", height = 50*nrow(W_impact_trip), width =
