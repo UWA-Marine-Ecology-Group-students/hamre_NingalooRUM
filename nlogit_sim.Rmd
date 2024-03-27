@@ -62,46 +62,337 @@ tau %<>%
   rename(cset = cov, tau = coef, lci_tau = lci, uci_tau = uci) 
 dat %<>% left_join(tau, by = "cset")  # append taus
 
-dat %<>% mutate(tc = b$coef[1],
-                lci_tc = b$lci[1],
+dat %<>% mutate(lci_tc = b$lci[1],
+                tc = b$coef[1],
                 uci_tc = b$uci[1]) # appending tc coef to data
 
 # dat[which(dat$trip_id %in% 259), c("cset", "gridid_alt", "coef", "lci", "uci", "tau", "lci_tau", "uci_tau", "tc", "lci_tc", "uci_tc")]
 ```
 
-# Testing without error
+# Base
 ```{r}
-dat %<>% mutate(tc_coef = b$Coef[1]) # appending tc coef to data
-dat$vj_tc <- dat$fcflt_spgam * dat$tc_coef # utility of tc
-dat$vj_tot <- dat$vj_tc + dat$Coef # total utility
+# calculate utility of tc
+dat %<>%
+  mutate(lci_vj_tc = lci_tc * fcflt_spgam,
+         vj_tc = tc * fcflt_spgam, 
+         uci_vj_tc = uci_tc * fcflt_spgam)
+
+any(dat$lci_vj_tc > dat$vj_tc) # FALSE
+any(dat$uci_vj_tc < dat$vj_tc) # FALSE
+
+# calculate total utility
+dat %<>%
+  mutate(lci_tot_vj = lci_vj_tc + coef,
+         tot_vj = vj_tc + coef, 
+         uci_tot_vj = uci_vj_tc + coef)
+
+any(dat$lci_tot_vj > dat$tot_vj) # FALSE
+any(dat$uci_tot_vj < dat$tot_vj) # FALSE
 
 # Conditional probability
-dat$condp_scale <- dat$vj_tot/dat$tau 
-dat$condp_num <- exp(dat$condp_scale)
+## condp scalar
+dat %<>%
+  mutate(lci_condp_scale = lci_tot_vj/lci_tau,
+         condp_scale = tot_vj/tau, 
+         uci_condp_scale = uci_tot_vj/uci_tau)
+
+any(dat$lci_condp_scale > dat$condp_scale) # TRUE
+any(dat$uci_condp_scale < dat$condp_scale) # TRUE
+
+## condp numerator
+dat %<>%
+  mutate(lci_condp_num = exp(lci_condp_scale),
+         condp_num = exp(condp_scale), 
+         uci_condp_num = exp(uci_condp_scale))
+
+any(dat$lci_condp_num > dat$condp_num) # TRUE
+any(dat$uci_condp_num < dat$condp_num) # FALSE
+
+## condp denominator
+tmp <- dat %>% group_by(trip_id, cset) %>% summarise(lci_condp_dom = sum(lci_condp_num)) %>% ungroup()
+dat %<>% left_join(tmp) 
+
 tmp <- dat %>% group_by(trip_id, cset) %>% summarise(condp_dom = sum(condp_num)) %>% ungroup()
 dat %<>% left_join(tmp) 
-dat$condp <- dat$condp_num/dat$condp_dom
-dat$iv <- log(dat$condp_dom)
 
-## P1: probability of choosen nest
-dat$p1_scale <- dat$iv*dat$tau
-# Wnk: THIS IS WHERE YOU WOUDL ADD THE UTILITY FOR VARS THAT DESCRIBE YOUR NEST AND ADD IT TO p1_scale
-# I do not have any in this model
-dat$p1_num <- exp(dat$p1_scale)
+tmp <- dat %>% group_by(trip_id, cset) %>% summarise(uci_condp_dom = sum(uci_condp_num)) %>% ungroup()
+dat %<>% left_join(tmp) 
+
+any(dat$lci_condp_dom > dat$condp_dom) # TRUE
+any(dat$uci_condp_dom < dat$condp_dom) # FALSE
+
+# condp
+dat %<>%
+  mutate(lci_condp = lci_condp_num/lci_condp_dom,
+         condp = condp_num/condp_dom, 
+         uci_condp = uci_condp_num/uci_condp_dom)
+
+any(dat$lci_condp > dat$condp) # TRUE
+any(dat$uci_condp < dat$condp) # TRUE
+
+# condp iv (inclusive value of condp)
+dat %<>%
+  mutate(lci_iv = log(lci_condp_dom),
+         iv = log(condp_dom), 
+         uci_iv = log(uci_condp_dom))
+
+any(dat$lci_iv > dat$iv) # TRUE
+any(dat$uci_iv < dat$iv) # FALSE
+
+# P1: probability of chooses nest
+## p1 scalar
+dat %<>%
+  mutate(lci_p1_scale = lci_iv*lci_tau,
+         p1_scale = iv*tau,
+         uci_p1_scale = uci_iv*uci_tau)
+
+any(dat$lci_p1_scale > dat$p1_scale) # FALSE
+any(dat$uci_p1_scale < dat$p1_scale) # FALSE
+
+## p1 numerator
+dat %<>%
+  mutate(lci_p1_num = exp(lci_p1_scale),
+         p1_num = exp(p1_scale), 
+         uci_p1_num = exp(uci_p1_scale))
+
+any(dat$lci_p1_num > dat$p1_num) # FALSE
+any(dat$uci_p1_num < dat$p1_num) # FALSE
+
+# p1 denominator
+tmp <- dat %>% group_by(trip_id) %>% distinct(lci_p1_num) %>% summarise(lci_p1_dom = sum(lci_p1_num))
+dat %<>% left_join(tmp) 
+
 tmp <- dat %>% group_by(trip_id) %>% distinct(p1_num) %>% summarise(p1_dom = sum(p1_num))
 dat %<>% left_join(tmp) 
-dat$p1 <- dat$p1_num/dat$p1_dom
 
-dat$p2 <- dat$condp * dat$p1
+tmp <- dat %>% group_by(trip_id) %>% distinct(uci_p1_num) %>% summarise(uci_p1_dom = sum(uci_p1_num))
+dat %<>% left_join(tmp) 
+
+any(dat$lci_p1_dom > dat$p1_dom) # FALSE
+any(dat$uci_p1_dom < dat$p1_dom) # FALSE
+
+# p1
+dat %<>%
+  mutate(lci_p1 = lci_p1_num/lci_p1_dom,
+         p1 = p1_num/p1_dom,
+         uci_p1 = uci_p1_num/uci_p1_dom)
+
+any(dat$lci_p1 > dat$p1) # TRUE
+any(dat$uci_p < dat$p1) # FALSE
+
+## P2: pr that agent will choose bottom level alternative
+dat %<>%
+  mutate(lci_p2 = lci_condp * lci_p1,
+         p2 = condp * p1, 
+         uci_p2 = uci_condp * uci_p1)
+
+any(dat$lci_p2 > dat$p2) # TRUE
+any(dat$uci_p2 < dat$p2) # TRUE
+
+# Logsum base
+dat %<>%
+  mutate(lci_logsum_base = log(lci_p1_dom),
+         logsum_base = log(p1_dom), 
+         uci_logsum_base = log(uci_p1_dom))
+
+any(dat$lci_logsum_base > dat$logsum_base) # FALSE
+any(dat$uci_logsum_base < dat$logsum_base) # FALSE
+
+# dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 228:length(dat))]
+```
+
+# Counterfactual 
+```{r}
+# Change utility to zero for fishers
+dat$lci_vj_sim <- dat$lci_tot_vj
+dat$vj_sim <- dat$tot_vj
+dat$uci_vj_sim <- dat$uci_tot_vj
+
+identical(dat$lci_vj_sim, dat$lci_tot_vj) # TRUE
+identical(dat$vj_sim, dat$tot_vj) # TRUE
+identical(dat$uci_vj_sim, dat$uci_tot_vj) # TRUE
+
+dat %<>% mutate(lci_vj_sim = ifelse(zone_rm == 1, 0, lci_vj_sim)) 
+dat %<>% mutate(vj_sim = ifelse(zone_rm == 1, 0, vj_sim)) 
+dat %<>% mutate(uci_vj_sim = ifelse(zone_rm == 1, 0, uci_vj_sim)) 
+
+identical(dat$lci_vj_sim, dat$lci_tot_vj) # FALSE
+identical(dat$vj_sim, dat$tot_vj) # FALSE
+identical(dat$uc_vj_sim, dat$uci_tot_vj) # FALSE
+
+# Conditional probability
+## condp scalar
+dat %<>%
+  mutate(lci_condp_scale_sim = lci_vj_sim/lci_tau,
+         condp_scale_sim = vj_sim/tau, 
+         uci_condp_scale_sim = uci_vj_sim/uci_tau)
+
+any(dat$lci_condp_scale_sim > dat$condp_scale_sim) # TRUE
+any(dat$uci_condp_scale_sim < dat$condp_scale_sim) # TRUE
+
+## condp numerator
+dat %<>%
+  mutate(lci_condp_num_sim = exp(lci_condp_scale_sim),
+         condp_num_sim = exp(condp_scale_sim), 
+         uci_condp_num_sim = exp(uci_condp_scale_sim))
+
+any(dat$lci_condp_num_sim > dat$condp_num_sim) # TRUE
+any(dat$uci_condp_num_sim < dat$condp_num_sim) # TRUE
+
+## condp denominator
+tmp <- dat %>% group_by(trip_id, cset) %>% summarise(lci_condp_dom_sim = sum(lci_condp_num_sim)) %>% ungroup()
+dat %<>% left_join(tmp) 
+
+tmp <- dat %>% group_by(trip_id, cset) %>% summarise(condp_dom_sim = sum(condp_num_sim)) %>% ungroup()
+dat %<>% left_join(tmp) 
+
+tmp <- dat %>% group_by(trip_id, cset) %>% summarise(uci_condp_dom_sim = sum(uci_condp_num_sim)) %>% ungroup()
+dat %<>% left_join(tmp) 
+
+any(dat$lci_condp_dom_sim > dat$condp_dom_sim) # TRUE
+any(dat$uci_condp_dom_sim < dat$condp_dom_sim) # TRUE
+
+# condp
+dat %<>%
+  mutate(lci_condp_sim = lci_condp_num_sim/lci_condp_dom_sim,
+         condp_sim = condp_num_sim/condp_dom_sim, 
+         uci_condp_sim = uci_condp_num_sim/uci_condp_dom_sim)
+
+any(dat$lci_condp_sim > dat$condp_sim) # TRUE
+any(dat$uci_condp_sim < dat$condp_sim) # TRUE
+
+# condp iv (inclusive value of condp)
+dat %<>%
+  mutate(lci_iv_sim = log(lci_condp_dom_sim),
+         iv_sim = log(condp_dom_sim), 
+         uci_iv_sim = log(uci_condp_dom_sim))
+
+any(dat$lci_iv_sim > dat$iv_sim) # TRUE
+any(dat$uci_iv_sim < dat$iv_sim) # TRUE
+
+# P1: probability of chooses nest
+## p1 scalar
+dat %<>%
+  mutate(lci_p1_scale_sim = lci_iv_sim*lci_tau,
+         p1_scale_sim = iv_sim*tau,
+         uci_p1_scale_sim = uci_iv_sim*uci_tau)
+
+any(dat$lci_p1_scale_sim > dat$p1_scale_sim) # FALSE
+any(dat$uci_p1_scale_sim < dat$p1_scale_sim) # FALSE
+
+## p1 numerator
+dat %<>%
+  mutate(lci_p1_num_sim = exp(lci_p1_scale_sim),
+         p1_num_sim = exp(p1_scale_sim), 
+         uci_p1_num_sim = exp(uci_p1_scale_sim))
+
+any(dat$lci_p1_num_sim > dat$p1_num_sim) # FALSE
+any(dat$uci_p1_num_sim < dat$p1_num_sim) # FALSE
+
+# p1 denominator
+tmp <- dat %>% group_by(trip_id) %>% distinct(lci_p1_num_sim) %>% summarise(lci_p1_dom_sim = sum(lci_p1_num_sim))
+dat %<>% left_join(tmp) 
+
+tmp <- dat %>% group_by(trip_id) %>% distinct(p1_num_sim) %>% summarise(p1_dom_sim = sum(p1_num_sim))
+dat %<>% left_join(tmp) 
+
+tmp <- dat %>% group_by(trip_id) %>% distinct(uci_p1_num_sim) %>% summarise(uci_p1_dom_sim = sum(uci_p1_num_sim))
+dat %<>% left_join(tmp) 
+
+any(dat$lci_p1_dom_sim > dat$p1_dom_sim) # FALSE
+any(dat$uci_p1_dom_sim < dat$p1_dom_sim) # FALSE
+
+# p1
+dat %<>%
+  mutate(lci_p1_sim = lci_p1_num_sim/lci_p1_dom_sim,
+         p1_sim = p1_num_sim/p1_dom_sim,
+         uci_p1_sim = uci_p1_num_sim/uci_p1_dom_sim)
+
+any(dat$lci_p1_sim > dat$p1_sim) # TRUE
+any(dat$uci_p_sim < dat$p1_sim) # FALSE
+
+## P2: pr that agent will choose bottom level alternative
+dat %<>%
+  mutate(lci_p2_sim = lci_condp_sim * lci_p1_sim,
+         p2_sim = condp_sim * p1_sim, 
+         uci_p2_sim = uci_condp_sim * uci_p1_sim)
+
+any(dat$lci_p2_sim > dat$p2_sim) # TRUE
+any(dat$uci_p2_sim < dat$p2_sim) # TRUE
+
+# Logsum base
+dat %<>%
+  mutate(lci_logsum_sim = log(lci_p1_dom_sim),
+         logsum_sim = log(p1_dom_sim), 
+         uci_logsum_sim = log(uci_p1_dom_sim))
+
+any(dat$lci_logsum_sim > dat$logsum_sim) # FALSE
+any(dat$uci_logsum_sim < dat$logsum_sim) # FALSE
+
+# dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 229:231, 274:length(dat))]
+```
+
+# Welfare estimate
+```{r}
+# welfare impact per trip_id
+tmp <- dat %>% 
+  group_by(trip_id) %>%
+  distinct(trip_id, .keep_all = TRUE) %>% 
+  summarise(lci_welfare = (lci_logsum_sim - lci_logsum_base)/fcflt_spgam,
+            welfare = (logsum_sim - logsum_base)/fcflt_spgam,
+            uci_welfare = (uci_logsum_sim - uci_logsum_base)/fcflt_spgam) %>% 
+  mutate(av_lci_welfare = mean(lci_welfare),
+         av_welfare = mean(welfare),
+         av_uci_welfare = mean(uci_welfare))
+
+dat %<>% left_join(tmp) 
+
+any(dat$lci_welfare > dat$welfare) # TRUE
+any(dat$uci_welfare < dat$welfare) # TRUE
+
+any(dat$av_lci_welfare > dat$av_welfare) # TRUE
+any(dat$av_uci_welfare < dat$av_welfare) # TRUE
+
+cs <- cbind(dat[1, "av_lci_welfare"], dat[1, "av_welfare"], dat[1, "av_uci_welfare"])
+
+cs
+
+dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 271:273, 307:length(dat))]
+```
+
+# ARCHIVE
+## Base without error
+```{r}
+# tmp <- dat %>% 
+#   group_by(trip_id) %>% 
+#   summarise(lci_logsum_base = mean(lci_logsum_base),
+#             mean_logsum_base = mean(logsum_base),
+#             uci_logsum_base = mean(uci_logsum_base))
+
+# dat$vj_tc <- dat$fcflt_spgam * dat$tc_coef # utility of tc
+# dat$vj_tot <- dat$vj_tc + dat$Coef # total utility
+
+# Conditional probability
+# dat$condp_scale <- dat$vj_tot/dat$tau 
+# dat$condp_num <- exp(dat$condp_scale)
+# tmp <- dat %>% group_by(trip_id, cset) %>% summarise(condp_dom = sum(condp_num)) %>% ungroup()
+# dat %<>% left_join(tmp) 
+# dat$condp <- dat$condp_num/dat$condp_dom
+# dat$iv <- log(dat$condp_dom)
+
+## P1: probability of choosen nest
+# dat$p1_scale <- dat$iv*dat$tau
+# Wnk: THIS IS WHERE YOU WOUDL ADD THE UTILITY FOR VARS THAT DESCRIBE YOUR NEST AND ADD IT TO p1_scale
+# I do not have any in this model
+# dat$p1_num <- exp(dat$p1_scale)
+# tmp <- dat %>% group_by(trip_id) %>% distinct(p1_num) %>% summarise(p1_dom = sum(p1_num))
+# dat %<>% left_join(tmp) 
+# dat$p1 <- dat$p1_num/dat$p1_dom
+
+# dat$p2 <- dat$condp * dat$p1
 
 ## logsum_base
-logsum_base <- log(dat$p1_dom)
-
-## simulation
-dat$vj_sim <- dat$vj_tot
-dat %<>% mutate(vj_sim = ifelse(zone_rm == 1, 0, vj_sim)) 
-
-dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 228:length(dat))]
+# logsum_base <- log(dat$p1_dom)
 ```
 
 
