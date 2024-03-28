@@ -463,6 +463,11 @@ dat %<>%
       mutate(UseLong = st_coordinates(geometry)[,1]) %>%
       mutate(UseLat = st_coordinates(geometry)[,2]) 
     
+    
+    dat %<>% mutate(Age = ifelse(is.na(Age), mean(dat$Age, na.rm = TRUE), Age))
+    dat %<>% mutate(exTimes12m = ifelse(is.na(exTimes12m), mean(dat$exTimes12m, na.rm = TRUE), exTimes12m))
+    dat %<>% mutate(Resident = ifelse(Resident %in% "Yes", 1, 0))
+    
       write.csv(dat, "data/02_data/2.1_filtered_dat.csv")
       
       rm(hol, grid_base)
@@ -1229,7 +1234,7 @@ cset %<>% clean_names()
     b_ex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
-                    accom, geom_accom, geometry, use_long, use_lat) %>%
+                    ex_times12m, resident, accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
     
@@ -1237,21 +1242,21 @@ cset %<>% clean_names()
     b_nex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
-                    accom, geom_accom, geometry, use_long, use_lat) %>%
+                    ex_times12m, resident,accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
         
     s_ex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
-                    accom, geom_accom, geometry, use_long, use_lat) %>%
+                    ex_times12m, resident,accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
             
     s_nex_dat %<>% 
       dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
-                    accom, geom_accom, geometry, use_long, use_lat) %>%
+                    ex_times12m, resident,accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
       as.data.frame()
     

@@ -25,7 +25,7 @@ library(sf)
 # BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") # This is produced by "BRtrips.R" in function folder
 
 # simulation 
-model <- "nex" #'[#NOTE: choose model] 
+model <- "nex_ex" #'[#NOTE: choose model] 
 sim <- "sim4" #'[#NOTE: choose simulation] 
 cost <- "fcflt_spgam"  #'[#NOTE: choose cost variable] # not needed for attatasc
 
@@ -38,8 +38,7 @@ v <- read_excel(paste0("./data/03_data/", model, ".xlsx"), sheet = "v", col_name
 # dat <- read_csv("./data/02_data/2.3_dat_att.csv") # attribute
 
 # NEX RUMN paper
-dat <- read_csv(paste0("./data/02_data/2.1_nex_", sim, ".csv")) # NEX
-# dat <- read_csv(paste0("./data/02_data/2.1_nex_ex_", sim, ".csv")) # comprable EX for NEX
+dat <- read_csv(paste0("./data/02_data/2.1_nex_ex_", sim, ".csv")) # comprable EX for NEX
 
 # plotting data
 # mp <- st_read("./data/gpkg/pmmp_4326.gpkg")
@@ -146,37 +145,37 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
           Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
         }
         
-    dat %<>%
+            dat %<>%
         mutate(gridid_int = group_indices(., gridid_alt),
-         tripid_int = group_indices(., trip_id))  # making id integers    
-        
-        
-    Vj <- as.data.table(Vj) # make data.table to save RAM
-    cols <- colnames(Vj) # save the names of the draws for later
-    Vj$tau <- dat$tau
-    Vj$ID <- as.integer(dat$gridid_int) # run function by BR
-    Vj$tc <- dat$fcflt_spgam # add travel cost
-    Vj$trip_id <- as.integer(dat$trip_id) # add trip id
-    Vj$br <- as.integer(dat$ramp_id) # add trip id
+         tripid_int = group_indices(., trip_id))  # making id integers
+    #     
+    # Vj <- as.data.table(Vj) # make data.table to save RAM
+    # cols <- colnames(Vj) # save the names of the draws for later
+    # # Vj$tau <- dat$tau
+    # Vj$ID <- as.integer(dat$gridid_int) # run function by BR
+    # # Vj$tc <- dat$fcflt_spgam # add travel cost
+    # # Vj$trip_id <- as.integer(dat$trip_id) # add trip id
+    # Vj$br <- as.integer(dat$ramp_id) # add trip id
     
-    nx <- length(Vj) - n1
-    nx <- length(Vj) - nx
-        
-    condp_Vj <- Vj %>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
-    # Vj %<>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
-  
-    ## FOR ALL
-     condp_Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
+    
+    # nx <- length(Vj) - n1
+    # nx <- length(Vj) - nx
+    #     
+    # condp_Vj <- Vj %>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
+    # # Vj %<>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
+    # 
+    # ## FOR ALL
+    #  condp_Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
      # Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
     
-        # Vj <- exp(Vj) # get exponential of utility
+        Vj <- exp(Vj) # get exponential of utility
         
         #'[#VALIDATE: TRUE, exp(Vj) should make all values positive]
        identical(which(Vj < 0), integer(0))
        which(is.infinite(as.matrix(Vj)))
      
-     identical(which(condp_Vj < 0), integer(0))
-      which(is.infinite(as.matrix(condp_Vj)))
+     # identical(which(condp_Vj < 0), integer(0))
+     #  which(is.infinite(as.matrix(condp_Vj)))
     
        # data for testing manually   
        # t <- dat %>% filter(trip_id %in% 259)
@@ -196,36 +195,47 @@ We need to use the condition choice probability when doing nested models. This i
 
 ## Pr status quo
 ```{r Pr_base, include = FALSE}
+    dat %<>%
+        mutate(gridid_int = group_indices(., gridid_alt),
+         tripid_int = group_indices(., trip_id))  # making id integers
+
+   Vj <- as.data.table(Vj) # make data.table to save RAM
+    cols <- colnames(Vj) # save the names of the draws for later
+    # Vj$br <- as.integer(dat$RampID) # run function by BR
+    Vj$br <- as.integer(dat$ramp_id) # run function by BR
+    Vj$ID <- as.integer(dat$gridid_int) # add gridID_alt for group_by
+    Vj$tc <- dat$fcflt_spgam # add travel cost
+
     # Calculate probability of visit and logsums: pre-simulation
     f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)}
 
     p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # applying probability function to every cell in Vj by boat ramp - BOAT BASED RUMS ONLY
-    condp <- condp_Vj[ , lapply(.SD, f1), .SDcols = c(cols)] # applying probability function to every cell in Vj - no groupd when BOAT AND SHORE BASED should be same length as data
+    # condp <- condp_Vj[ , lapply(.SD, f1), .SDcols = c(cols)] # applying probability function to every cell in Vj - no groupd when BOAT AND SHORE BASED should be same length as data
 
-    logsum_condp <- condp_Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
+    # logsum_condp <- condp_Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
+    # 
+    # logsum_condp <- log(logsum_condp[, -1])
+    # w <- as.matrix(logsum_condp)
+    # logsum_condp$mean_logsum <- rowQuantiles(w, probs = sqrt(0.025)) # lower ci
     
-    logsum_condp <- log(logsum_condp[, -1])
-    w <- as.matrix(logsum_condp)
-    logsum_condp$mean_logsum <- rowQuantiles(w, probs = sqrt(0.025)) # lower ci
     
-    
-    # p <- p[order(br, ID)] # ordering
-    # dat %<>% arrange(ramp_id, gridid_alt) # ordering
+    p <- p[order(br, ID)] # ordering
+    dat %<>% arrange(ramp_id, gridid_alt) # ordering
 
     #'[#VALIDATE: TRUE, should be the same so you can append probabilities]
-    # table(dat$gridid_alt == p$ID)
+    table(dat$gridid_alt == p$ID)
     # table(dat$gridid_int == p$ID)
 
     nrow(dat) == nrow(p)
 
-    # p <- p[ , br := NULL] # remove
+    p <- p[ , br := NULL] # remove
     p <- p[ , ID := NULL] # remove
     p <- as.matrix(p)   # make matrix
 
     #'[#VALIDATE: TRUE, sum(p(each site from br)) == 1, so sum(p(each site from every         boat ramp)) == #boat ramps]
 
     sum(p[,1]) # the sum of probability shoudl equal 1
-    # n_distinct(dat$ramp_id)
+    n_distinct(dat$ramp_id)
 
     # Adds probability statistics (lower ci, median, upper ci) to each row of dat. This is the probability that people will visit site (gridID_alt) pre-simulation.
     # Summary stats are calculated across each row in p (rowQuantiles), length == n1
@@ -236,11 +246,11 @@ We need to use the condition choice probability when doing nested models. This i
 
 ## Prep logsums
 ## Sum by boat ramp to scale the trip costs to annual boat ramp visists
-    # logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # BOAT BASED
+    logsum_base <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # BOAT BASED
 
 ## MIXED MODE
 ## Sum boat and shore based (mixed mode) models by trip id to get a welafre value per person which can be averaged
-    logsum_base <- Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
+    # logsum_base <- Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
 ```
 
 ## Pr counterfactual
@@ -263,15 +273,15 @@ We need to use the condition choice probability when doing nested models. This i
 
 # Calculate probability of visit and logsums: post-simulation
     Vj[Vj$ID %in% ntz, cols] <- 0
-    # p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # BOAT BASED
-    p <- Vj[ , lapply(.SD, f1), .SDcols = c(cols, "ID")] # BOAT AND SHORE
+    p <- Vj[ , lapply(.SD, f1), by = br, .SDcols = c(cols, "ID")] # BOAT BASED
+    # p <- Vj[ , lapply(.SD, f1), .SDcols = c(cols, "ID")] # BOAT AND SHORE
     
     # p <- p[order(br, ID)]
     # dat %<>% arrange(ramp_id, gridid_alt)
     # table(dat$gridid_alt == p$ID) # should all be tru
     # table(dat$gridid_int == p$ID) # should all be tru
     # 
-    # p <- p[ , br := NULL]
+    p <- p[ , br := NULL]
     p <- p[ , ID := NULL]
     p <- as.matrix(p)
     
@@ -284,11 +294,11 @@ We need to use the condition choice probability when doing nested models. This i
     # Sum the utilities by grouping variable
 ## BOAT BASED
 ## Sum by boat ramp to scale the trip costs to annual boat ramp visists
-    # logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # BOAT BASED
+    logsum_sim <- Vj[ , lapply(.SD, sum), by = br, .SDcols = cols]  # BOAT BASED
 
 ## MIXED MODE
 ## Sum boat and shore based (mixed mode) models by trip id to get a welafre value per person which can be averaged
-    logsum_sim <- Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
+    # logsum_sim <- Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
 ```
 
 # Extract Welfare
@@ -311,9 +321,9 @@ welfare with a nested logit = log(sum(exp(utility of all alts/tau)))/tc
     logsum_sim$w.upp <- rowQuantiles(W, probs = 1 - sqrt(0.025)) # upper ci
     
     # dat %<>%  mutate(rampid = as.integer(rampid))
-    # dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("ramp_id" = "br")) # BOAT
+    dat %<>% left_join(logsum_sim[ , c("br", "w.mean", "w.upp", "w.low")], by = c("ramp_id" = "br")) # BOAT
     
-    dat %<>% left_join(logsum_sim[ , c("trip_id", "w.mean", "w.upp", "w.low")]) # MIXED MODE
+    # dat %<>% left_join(logsum_sim[ , c("trip_id", "w.mean", "w.upp", "w.low")]) # MIXED MODE
 
     # # Welfare impact of closure 
     # BOAT BASED - you sum to get the total welafre impact acorss all boat ramps
