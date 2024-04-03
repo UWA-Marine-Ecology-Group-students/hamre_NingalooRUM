@@ -77,8 +77,21 @@ dat: contains a row for  (nrow(dat)) = every available option (n grid cells, exc
     v_nest <- v_nest %>% dplyr::select(contains("age"))
 ```
 
-# Utility matrix
-# Bottom level alternatives
+The coef of the logit model gives us the marginal utilities. This is the extra utility an agent receives for one extra unit, given all the other parameters stay constant. 
+
+Calculate the utility (Vj) for every alternative, each individual observation in dat represents an alternative. 
+
+We expect recreator  (n) to choose the site (j) with the highest expected utility. The utility  (Vj) of a site is a function of the observed attributes (B) of those sites and associated error (e).
+
+      Vnj = Bj + Ej
+
+      Vj = B(depth + travel cost etc.) + e 
+      
+The errors are assumed to follow the generalized extreme value (GEV) distribution type 1 (Gumbel distribution). This distribution is a normal distribution with a slight larger tail on one side. The errors are also assumed to be identical and independently distributed (i.i.d. assumption). This means there cannot be any correlation in the errors. Therefore the site definitions have to have no correlated errors, and therefore have to be different enough that the error don't correlated. If the researcher thinks there is some unobserved correlation in the errors, then the alternatives can be grouped into nests. For example boat fishing and shore fishing and inherently different, therefore you could cluster shore and boat based sites into a boat and shore nest. Doing a nested model relaxes the iid assumption and allows for some correlation within nests, but no correlation between nests. 
+
+
+
+# Status Quo
 ```{r}
 ## Generate error from cov-var matrix
     n1 <- 1000 # number of samples (all estimates)
@@ -105,51 +118,59 @@ dat: contains a row for  (nrow(dat)) = every available option (n grid cells, exc
    
     dat %<>%
         mutate(gridid_int = group_indices(., gridid_alt),
-               tripid_int = group_indices(., trip_id),
+               tripid_int = as.integer(trip_id),
                cset_int = group_indices(., cset))  # making id integers
     
    condp_num <- as.data.table(condp_num) # make data.table to save RAM
    condp_num_cols <- colnames(condp_num) # save the names of the draws for later
    condp_num$trip <- as.integer(dat$tripid_int) # add 
    condp_num$cset <- as.integer(dat$cset_int) # add 
+   condp_num$gridid <- as.integer(dat$gridid_int) # add 
    
+   condp_num %<>%  relocate(gridid, .before = 1)
    condp_num %<>%  relocate(cset, .before = 1)
    condp_num %<>%  relocate(trip, .before = 1)
-   
-  condp_dom <- condp_num %>% 
-    group_by(trip, cset) %>% 
-    summarise(across(V1:V1000, sum)) %>% 
-    rename_with(~ gsub("V", "dom_", .), starts_with("V"))
-    
-  condp_dom %<>% left_join(condp_num)
-  condp_dom %<>% dplyr::select(1:1002) 
+  # 
+  # condp_dom <- condp_num %>%
+  #   group_by(trip, cset) %>%
+  #   summarise(across(V1:V1000, sum)) %>%
+  #   rename_with(~ gsub("V", "dom_", .), starts_with("V"))
   
-  condp_num <- as.matrix(condp_num[,3:1002])
-  condp_dom <- as.matrix(condp_dom[,3:1002])
+  condp_dom <- condp_num[ , lapply(.SD, sum), by = c("trip", "cset"), .SDcols = condp_num_cols]
+  
+  condp_dom %<>% left_join(condp_num, by = c("trip", "cset"))
+  condp_dom %<>% dplyr::select(1:1002) 
 
-  condp <- condp_num/condp_dom
+  condp <- as.matrix(condp_num[,4:1003])/as.matrix(condp_dom[,3:1002])
   
   dat$lci_condp <- rowQuantiles(condp, probs = sqrt(0.025)) # lower ci
   dat$m_condp <- rowQuantiles(condp, probs = sqrt(0.5)) # lower ci
   dat$uci_condp <- rowQuantiles(condp, probs = 1 - sqrt(0.025)) # upper ci
   
-  iv <- log(condp_dom)
+  iv <- log(condp_dom[,3:1002])
+  
+  which(dat$lci_condp > dat$m_condp)
+  which(dat$m_condp > dat$uci_condp)
   
 # P1: Pr that agent chooses nest
 ## utility of nest
     n1 <- 1000 # number of samples (all estimates)
-    mvn_b <- mvrnorm(n1, mu = b_nest$Coef, Sigma = as.matrix(v_nest))  # generate error
-    dim(mvn_b)[1] == n1 # should be true
+    mvn_bk <- mvrnorm(n1, mu = b_nest$Coef, Sigma = as.matrix(v_nest))  # generate error
+    dim(mvn_bk)[1] == n1 # should be true
     
-## Make rum matirx which alings with b cov
-  
-    rum_matrix <- as.matrix(dat[, c("age", "age", "age")]) # extract data 
+## Make rum matirx which alings with b co
+    dat %<>% mutate(b_n_age = ifelse(dat$cset %in% "b_n", dat$age, 0),
+                    s_e_age = ifelse(dat$cset %in% "s_e", dat$age, 0),
+                    s_n_age = ifelse(dat$cset %in% "s_n", dat$age, 0))
+    
+    rum_matrix <- as.matrix(dat[, c("b_n_age", "s_e_age", "s_n_age")]) # extract data 
+    
       
 ## Calc utility
     vj_k <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) # create an empty utility matrix
         
     for (i in 1:n1) { 
-        vj_k[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
+        vj_k[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_bk[i,]))  
         }
         
     which(is.infinite(as.matrix(vj_k)))
@@ -158,238 +179,140 @@ dat: contains a row for  (nrow(dat)) = every available option (n grid cells, exc
   
   p1_num <- exp(vj_k+iv)
   
-  ## I AM HERE
-  p1_num$trip <- dat$tripid_int
+  p1_num <- as.data.table(p1_num)
+  p1_cols <- colnames(p1_num)
+  p1_num$trip <- as.integer(dat$tripid_int)
   
-  p1_dom <- p1_num %>% 
-    group_by(trip) %>% 
-    summarise(across(V1:V1000, sum)) %>% 
-    rename_with(~ gsub("V", "dom_", .), starts_with("V"))
-    
-  condp_dom %<>% left_join(condp_num)
-  condp_dom %<>% dplyr::select(1:1002) 
-  
-  
-  
+  # p1_dom <- p1_num %>% 
+  #   group_by(trip) %>% 
+  #   summarise(across(1:1000, sum))
+  # 
+   p1_dom <- p1_num[ , lapply(.SD, sum), by = trip, .SDcols = p1_cols]  # BOAT BASED
 
-# p1 denominator
-tmp <- dat %>% group_by(trip_id) %>% distinct(lci_p1_num) %>% summarise(lci_p1_dom = sum(lci_p1_num))
-dat %<>% left_join(tmp) 
-
-tmp <- dat %>% group_by(trip_id) %>% distinct(p1_num) %>% summarise(p1_dom = sum(p1_num))
-dat %<>% left_join(tmp) 
-
-tmp <- dat %>% group_by(trip_id) %>% distinct(uci_p1_num) %>% summarise(uci_p1_dom = sum(uci_p1_num))
-dat %<>% left_join(tmp) 
-
-any(dat$lci_p1_dom > dat$p1_dom) # FALSE
-any(dat$uci_p1_dom < dat$p1_dom) # FALSE
-
-# p1
-dat %<>%
-  mutate(lci_p1 = lci_p1_num/lci_p1_dom,
-         p1 = p1_num/p1_dom,
-         uci_p1 = uci_p1_num/uci_p1_dom)
-
-any(dat$lci_p1 > dat$p1) # TRUE
-any(dat$uci_p < dat$p1) # FALSE
+  # Use this to find p1, but you will need to change it so it deosnt chnage the current p1_dom  
+  # p1_dom %<>%  left_join(p1_num, by = "trip")
+  # p1_dom %<>% dplyr::select(1:1001) 
+  # 
+  # p1_num <- as.matrix(p1_num[,2:1001])
+  # p1_dom <- as.matrix(p1_dom[,2:1001])
+  # 
+  # p1 = p1_num/p1_dom
+  # 
+  # dat$lci_p1 <- rowQuantiles(p1, probs = sqrt(0.025)) # lower ci
+  # dat$m_p1 <- rowQuantiles(p1, probs = sqrt(0.5)) # lower ci
+  # dat$uci_p1 <- rowQuantiles(p1, probs = 1 - sqrt(0.025)) # upper ci
   
-  
-  
-  
-
-   
-    dat[which(dat$trip_id %in% 259), c("gridid_alt", "cset", "trip_id" ,"lci_condp", "m_condp", "uci_condp")]
-   
-    
-   f1 <- function(x) if (is.integer(x)) {x} else {x/tau}
-    
-   condp <- Vj[ , lapply(.SD, f1), .SDcols = c(cols)] # 
-    
-    
-      # dat %<>%
-      #   mutate(gridid_int = group_indices(., gridid_alt),
-      #    tripid_int = group_indices(., trip_id))  # making id integers
-    #     
-    # Vj <- as.data.table(Vj) # make data.table to save RAM
-    # cols <- colnames(Vj) # save the names of the draws for later
-    # # Vj$tau <- dat$tau
-    # Vj$ID <- as.integer(dat$gridid_int) # run function by BR
-    # # Vj$tc <- dat$fcflt_spgam # add travel cost
-    # # Vj$trip_id <- as.integer(dat$trip_id) # add trip id
-    # Vj$br <- as.integer(dat$ramp_id) # add trip id
-    
-    
-    # nx <- length(Vj) - n1
-    # nx <- length(Vj) - nx
-    #     
-    # condp_Vj <- Vj %>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
-    # # Vj %<>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
-    # 
-    # ## FOR ALL
-    #  condp_Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
-     # Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
-    
-        # Vj <- exp(Vj) # get exponential of utility
-        
-        #'[#VALIDATE: TRUE, exp(Vj) should make all values positive]
-       # identical(which(Vj < 0), integer(0))
-       which(is.infinite(as.matrix(Vj)))
-     
-     # identical(which(condp_Vj < 0), integer(0))
-     #  which(is.infinite(as.matrix(condp_Vj)))   
-    
-       
-       
-         for (i in unique(dat$cset)) {
-    cset = ifelse(dat$cset == i, 1, 0)
-    dat[,length(dat) + 1] <- cset
-    colnames(dat)[ncol(dat)] <- paste0(i, "_tau")
-  }
-       
-       
-      dat %<>% mutate(b_n_age = age,
-                      s_e_age = age,
-                      s_n_age = age) 
-    
+  # which(dat$lci_p1 > dat$m_p1)
+  # which(dat$m_p1 > dat$uci_p1)
 ```
 
-
-# Error 
-Generates coefficients drawn from within the ci of each variable. Draws n1 numbers (nrow) from within a multivariate normal distribution for each variable (length); mu = vector of means, Sigma = covarience matrix
-```{r error, include = FALSE}
-    n1 <- 1000 # number of samples (all estimates)
-    mvn_b <- mvrnorm(n1, mu = b$Coef, Sigma = as.matrix(v)) 
-
-# checkpoint
-dim(mvn_b)[1] == n1 # should be true
-dim(mvn_b)[2] == nrow(b) # should be true
-```
-
-# Utility matrix
-
-The coef of the logit model gives us the marginal utilities. This is the extra utility an agent receives for one extra unit, given all the other parameters stay constant. 
-
-Calculate the utility (Vj) for every alternative, each individual observation in dat represents an alternative. 
-
-We expect recreator  (n) to choose the site (j) with the highest expected utility. The utility  (Vj) of a site is a function of the observed attributes (B) of those sites and associated error (e).
-
-      Vnj = Bj + Ej
-
-      Vj = B(depth + travel cost etc.) + e 
-      
-The errors are assumed to follow the generalized extreme value (GEV) distribution type 1 (Gumbel distribution). This distribution is a normal distribution with a slight larger tail on one side. The errors are also assumed to be identical and independently distributed (i.i.d. assumption). This means there cannot be any correlation in the errors. Therefore the site definitions have to have no correlated errors, and therefore have to be different enough that the error don't correlated. If the researcher thinks there is some unobserved correlation in the errors, then the alternatives can be grouped into nests. For example boat fishing and shore fishing and inherently different, therefore you could cluster shore and boat based sites into a boat and shore nest. Doing a nested model relaxes the iid assumption and allows for some correlation within nests, but no correlation between nests. 
-
-```{r utility, include = FALSE}
-# ASC NEX RUM
-      b %<>% mutate(cov = ifelse(!str_detect(cov, "fc|age|tau"), paste0("gridid_", cov), cov)) # NEX 
-      bid <- unique(b$cov) 
- 
-      dat %<>% mutate(b_n_age = age,
-                      s_e_age = age,
-                      s_n_age = age) 
-      
-  for (i in unique(dat$cset)) {
-    cset = ifelse(dat$cset == i, 1, 0)
-    dat[,length(dat) + 1] <- cset
-    colnames(dat)[ncol(dat)] <- paste0(i, "_tau")
-  }
-
-      rum_matrix <- as.matrix(dat[, bid])
-      
-    
-    # create an empty utility matrix
-        Vj <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1)
-        
-# calculate observed utility for every alternative (nrows), n1 times from multivariate random normal distribution. We are multiplying the values in the rum_matrix (real data) by the error coefficients matrix (mvn_b)? so we have n1 utility values for each variable. 
-    
-# The loop below often fails: non-confromable. This means that you need to check the names in the vectors above to make sure the are the same as the model and mach the data set in the right order
-        
-        for (i in 1:n1) { 
-          Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
-        }
-        
-      # dat %<>%
-      #   mutate(gridid_int = group_indices(., gridid_alt),
-      #    tripid_int = group_indices(., trip_id))  # making id integers
-    #     
-    # Vj <- as.data.table(Vj) # make data.table to save RAM
-    # cols <- colnames(Vj) # save the names of the draws for later
-    # # Vj$tau <- dat$tau
-    # Vj$ID <- as.integer(dat$gridid_int) # run function by BR
-    # # Vj$tc <- dat$fcflt_spgam # add travel cost
-    # # Vj$trip_id <- as.integer(dat$trip_id) # add trip id
-    # Vj$br <- as.integer(dat$ramp_id) # add trip id
-    
-    
-    # nx <- length(Vj) - n1
-    # nx <- length(Vj) - nx
-    #     
-    # condp_Vj <- Vj %>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
-    # # Vj %<>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
-    # 
-    # ## FOR ALL
-    #  condp_Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
-     # Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
-    
-        # Vj <- exp(Vj) # get exponential of utility
-        
-        #'[#VALIDATE: TRUE, exp(Vj) should make all values positive]
-       # identical(which(Vj < 0), integer(0))
-       which(is.infinite(as.matrix(Vj)))
-     
-     # identical(which(condp_Vj < 0), integer(0))
-     #  which(is.infinite(as.matrix(condp_Vj)))
-    
-       # data for testing manually   
-       # t <- dat %>% filter(trip_id %in% 259)
-       # t <- t[, c("trip_id", "choice", "fcflt_spgam", "cset", "gridid_alt", "tau")]
-       # t %<>% arrange(gridid_alt)
-       # write.csv(t, "./data/03_data/test.csv")
-```
-
-# Conditional probability matrix
+# Counterfactual
 ```{r}
+## Utility - turn utility to zero where sz are being removed
+  vj_bl_sim <- as.data.table(vj_bl) # use base bl utility matirx
+  cols <- colnames(vj_bl_sim)
+  vj_bl_sim$gridid_int <- dat$gridid_int # append gridids
 
-  dat %<>%
-        mutate(gridid_int = group_indices(., gridid_alt),
-         tripid_int = group_indices(., trip_id))  # making id integers
-
-    Vj <- as.data.table(Vj) # make data.table to save RAM
-    cols <- colnames(Vj) # save the names of the draws for later
-    Vj$ID <- as.integer(dat$gridid_int) # add gridID_alt for group_by
-    Vj$tc <- dat$fcflt_spgam # add travel cost
-    Vj$tau <- dat$tau
-
-## condp scalar
-dat %<>%
-  mutate(lci_condp_scale = lci_tot_vj/lci_tau,
-         condp_scale = tot_vj/tau, 
-         uci_condp_scale = uci_tot_vj/uci_tau)
-
-    f1 <- function(x) if (is.integer(x)) {x} else {x/tau}
+  ntz <- dat %>% filter(zone_rm == 1) 
+  ntz <- unique(ntz$gridid_int)
+  
+   vj_bl_sim[vj_bl_sim$gridid_int %in% ntz, cols] <- 0
+        
+   which(is.infinite(as.matrix(vj_bl_sim)))
     
-    condp <- Vj[ , lapply(.SD, f1), .SDcols = c(cols)] # applying probability function to every cell in Vj - no groupd when BOAT AND SHORE BASED should be same length as data
+## Conditional Probability
+   vj_bl_sim <- vj_bl_sim[,1:1000] # remove gridid_int
+   
+   condp_num_sim <- exp(vj_bl_sim/tau)
     
+   condp_num_sim <- as.data.table(condp_num_sim) # make data.table to save RAM
+   condp_num_sim_cols <- colnames(condp_num_sim) # save the names of the draws for later
+   condp_num_sim$trip <- as.integer(dat$tripid_int) # add 
+   condp_num_sim$cset <- as.integer(dat$cset_int) # add 
+   
+   condp_num_sim %<>%  relocate(cset, .before = 1)
+   condp_num_sim %<>%  relocate(trip, .before = 1)
+   
+  # condp_dom_sim <- condp_num_sim %>% 
+  #   group_by(trip, cset) %>% 
+  #   summarise(across(V1:V1000, sum)) %>% 
+  #   rename_with(~ gsub("V", "dom_", .), starts_with("V"))
+   
+   condp_dom_sim <- condp_num_sim[ , lapply(.SD, sum), by = c("trip", "cset"), .SDcols = condp_num_sim_cols]
     
-      
-    # Calculate probability of visit and logsums: pre-simulation
-    f1 <- function(x) if (is.integer(x)) {x} else {x/sum(x)}
+  condp_dom_sim %<>% left_join(condp_num_sim, by = c("trip", "cset"))
+  condp_dom_sim %<>% dplyr::select(1:1002) 
 
+  condp_sim <- as.matrix(condp_num_sim[,3:1002])/as.matrix(condp_dom_sim[,3:1002])
+  
+  dat$lci_condp_sim <- rowQuantiles(condp_sim, probs = sqrt(0.025)) # lower ci
+  dat$m_condp_sim <- rowQuantiles(condp_sim, probs = sqrt(0.5)) # lower ci
+  dat$uci_condp_sim <- rowQuantiles(condp_sim, probs = 1 - sqrt(0.025)) # upper ci
+  
+  iv_sim <- log(condp_dom_sim[,3:1002])
+  
+  which(dat$lci_condp_sim > dat$m_condp_sim)
+  which(dat$m_condp_sim > dat$uci_condp_sim)
+  
+# P1: Pr that agent chooses nest
+  iv_sim <- iv_sim*tau
+  p1_num_sim <- exp(vj_k+iv_sim)
+  p1_num_sim <- as.data.table(p1_num_sim)
+  p1_cols <- colnames(p1_num_sim)
+  p1_num_sim$trip <- as.integer(dat$trip_id)
+  
+  # p1_dom_sim <- p1_num_sim %>% 
+  #   group_by(trip) %>% 
+  #   summarise(across(1:1000, sum))
 
-
-
-    # logsum_condp <- condp_Vj[ , lapply(.SD, sum), by = trip_id, .SDcols = cols]
-    # 
-    # logsum_condp <- log(logsum_condp[, -1])
-    # w <- as.matrix(logsum_condp)
-    # logsum_condp$mean_logsum <- rowQuantiles(w, probs = sqrt(0.025)) # lower ci
+   p1_dom_sim <- p1_num_sim[ , lapply(.SD, sum), by = trip, .SDcols = p1_cols]
     
+  # p1_dom_sim %<>%  left_join(p1_num_sim, by = "trip")
+  # p1_dom_sim %<>% dplyr::select(1:1001) 
+  # 
+  # p1_num_sim <- as.matrix(p1_num_sim[,2:1001])
+  # p1_dom_sim <- as.matrix(p1_dom_sim[,2:1001])
+  # 
+  # p1_sim = p1_num_sim/p1_dom_sim
+  # 
+  # dat$lci_p1_sim <- rowQuantiles(p1_sim, probs = sqrt(0.025)) # lower ci
+  # dat$m_p1_sim <- rowQuantiles(p1_sim, probs = sqrt(0.5)) # lower ci
+  # dat$uci_p1_sim <- rowQuantiles(p1_sim, probs = 1 - sqrt(0.025)) # upper ci
+  # 
+  # iv_p1_sim <- log(p1_dom_sim)
+  # 
+  # which(dat$lci_p1_sim > dat$m_p1_sim)
+  # which(dat$m_p1_sim > dat$uci_p1_sim)
 ```
 
+# Welfare
+```{r}
+b_fishers <- dat %>% filter(trip_id %in% fishers$trip_id)
 
+# Extracting the welfare impact
+    W <- log(p1_dom_sim[, -1]) -  log(p1_dom[, -1]) # always subtract the status quo by the counterfactual (simulation)
+    W <- t(W)/mvn_b[ ,1] # divide the logsums by the travel cost (need to pivot to do this t())
+    W <- t(W) # pivot back to original orientation
+    
+# Summaries across draws
+    W <- as.matrix(W)
+    
+    p1_dom_sim$lci_w <- rowQuantiles(W, probs = sqrt(0.025)) # lower ci
+    p1_dom_sim$m_w <- rowQuantiles(W, probs = sqrt(0.5)) # median
+    p1_dom_sim$uci_w <- rowQuantiles(W, probs = 1 - sqrt(0.025)) # upper ci
+    
+    dat %<>% left_join(p1_dom_sim[ , c("trip", "lci_w", "m_w", "uci_w")], by = c("tripid_int" = "trip")) 
+    
+    w <- dat %>% distinct(trip_id, .keep_all = TRUE)
+    w %<>% mutate(fisher = ifelse(trip_id %in% fishers$trip_id, 1, 0)) 
+    w %<>% group_by(fisher) %>% summarise(lci = round(mean(lci_w), 2), mean = round(mean(m_w), 2), uci = round(mean(uci_w), 2))
+
+    w
+```
+
+# ARCHIVE
 ## 3 values 
- If you manged to find out how to extract the correct confiende intervals  so you only have 3 values. 
+ If you manged to find out how to extract the correct confidence intervals  so you only have 3 values. 
 
 ### Wrangle
 The data is in the form of the model output from stata and is formatted like a table. 
@@ -425,7 +348,7 @@ The data is in the form of the model output from stata and is formatted like a t
 # # dat[which(dat$trip_id %in% 259), c("cset", "gridid_alt", "coef", "lci", "uci", "tau", "lci_tau", "uci_tau", "tc", "lci_tc", "uci_tc")]
 ```
 
-# Base
+### Base
 ```{r}
 # calculate utility of tc
 dat %<>%
@@ -557,7 +480,7 @@ any(dat$uci_logsum_base < dat$logsum_base) # FALSE
 # dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 228:length(dat))]
 ```
 
-# Counterfactual 
+### Counterfactual 
 ```{r}
 # Change utility to zero for fishers
 dat$lci_vj_sim <- dat$lci_tot_vj
@@ -690,7 +613,7 @@ any(dat$uci_logsum_sim < dat$logsum_sim) # FALSE
 dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 229:231, 274:length(dat))]
 ```
 
-# Welfare estimate
+### Welfare estimate
 ```{r}
 b_fishers <- dat %>% filter(trip_id %in% fishers$trip_id)
 
@@ -725,21 +648,16 @@ a %<>% group_by(fisher) %>% summarise(mean = mean(w))
   
 ## Welfare estimates
 # cs <- cbind(b_fishers[1, "av_lci_w"], b_fishers[1, "av_w"], b_fishers[1, "av_uci_w"])
-# cs
-
 
 # dat[which(dat$trip_id == 259), c(1, 45, 213:214, 223, 271:273, 307:length(dat))]
 # 
 # dat %>% filter(zone_rm == 1) %>% group_by(gridid_alt) %>% summarise(n=n())
-# 
+
 # which(dat$choice == 1 & dat$cset %in% "s_n" & dat$boat_access %in% "Yes")
-# 
-# dat[18800,]
-# 
+
 # dat[which(dat$trip_id == 279), c("cset", "gridid_alt","choice", "zone_rm","tot_vj", "vj_sim", "boat_access")]
 ```
 
-# ARCHIVE
 ## Base without error
 ```{r}
 # tmp <- dat %>% 
