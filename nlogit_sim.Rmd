@@ -52,7 +52,7 @@ dat: contains a row for  (nrow(dat)) = every available option (n grid cells, exc
       mutate(x...1 = ifelse(!(x...2 %in% c("_cons", "age")), x...2, x...1)) %>%  
       dplyr::select(-x...2) %>% 
       distinct()
-  
+
     colnames(v) <- c("vars", v$x...1)
     v %<>% dplyr::select(-vars)
     vars <- b$cov #use
@@ -66,7 +66,194 @@ dat: contains a row for  (nrow(dat)) = every available option (n grid cells, exc
     tau %<>% mutate(cov = substr(cov, 1, 3)) 
     tau %<>% rename(cset = cov, tau = Coef) 
     dat %<>% left_join(tau)
+    
+    b_asc <- b[c(1, 5:85),]
+    b_nest <- b[2:4,]
+    
+    v_asc <- v[c(1, 5:85),]
+    v_asc <- v_asc %>% dplyr::select(-contains("age") & -contains("tau"))
+    
+    v_nest <- v[2:4,]
+    v_nest <- v_nest %>% dplyr::select(contains("age"))
 ```
+
+# Utility matrix
+# Bottom level alternatives
+```{r}
+## Generate error from cov-var matrix
+    n1 <- 1000 # number of samples (all estimates)
+    mvn_b <- mvrnorm(n1, mu = b_asc$Coef, Sigma = as.matrix(v_asc))  # generate error
+    dim(mvn_b)[1] == n1 # should be true
+    
+## Make rum matirx which alings with b cov
+    b_asc %<>% mutate(cov = ifelse(!str_detect(cov, "fc"), paste0("gridid_", cov), cov)) # make names the same
+    bid <- unique(b_asc$cov) 
+    rum_matrix <- as.matrix(dat[, bid]) # extract data 
+      
+## Calc utility
+    vj_bl <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) # create an empty utility matrix
+        
+    for (i in 1:n1) { 
+        vj_bl[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
+        }
+        
+    which(is.infinite(as.matrix(vj_bl)))
+    
+## Conditional Probability
+   tau <- as.vector(dat$tau)
+   condp_num <- exp(vj_bl/tau)
+   
+    dat %<>%
+        mutate(gridid_int = group_indices(., gridid_alt),
+               tripid_int = group_indices(., trip_id),
+               cset_int = group_indices(., cset))  # making id integers
+    
+   condp_num <- as.data.table(condp_num) # make data.table to save RAM
+   condp_num_cols <- colnames(condp_num) # save the names of the draws for later
+   condp_num$trip <- as.integer(dat$tripid_int) # add 
+   condp_num$cset <- as.integer(dat$cset_int) # add 
+   
+   condp_num %<>%  relocate(cset, .before = 1)
+   condp_num %<>%  relocate(trip, .before = 1)
+   
+  condp_dom <- condp_num %>% 
+    group_by(trip, cset) %>% 
+    summarise(across(V1:V1000, sum)) %>% 
+    rename_with(~ gsub("V", "dom_", .), starts_with("V"))
+    
+  condp_dom %<>% left_join(condp_num)
+  condp_dom %<>% dplyr::select(1:1002) 
+  
+  condp_num <- as.matrix(condp_num[,3:1002])
+  condp_dom <- as.matrix(condp_dom[,3:1002])
+
+  condp <- condp_num/condp_dom
+  
+  dat$lci_condp <- rowQuantiles(condp, probs = sqrt(0.025)) # lower ci
+  dat$m_condp <- rowQuantiles(condp, probs = sqrt(0.5)) # lower ci
+  dat$uci_condp <- rowQuantiles(condp, probs = 1 - sqrt(0.025)) # upper ci
+  
+  iv <- log(condp_dom)
+  
+# P1: Pr that agent chooses nest
+## utility of nest
+    n1 <- 1000 # number of samples (all estimates)
+    mvn_b <- mvrnorm(n1, mu = b_nest$Coef, Sigma = as.matrix(v_nest))  # generate error
+    dim(mvn_b)[1] == n1 # should be true
+    
+## Make rum matirx which alings with b cov
+  
+    rum_matrix <- as.matrix(dat[, c("age", "age", "age")]) # extract data 
+      
+## Calc utility
+    vj_k <- matrix(NA, nrow = nrow(rum_matrix), ncol = n1) # create an empty utility matrix
+        
+    for (i in 1:n1) { 
+        vj_k[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
+        }
+        
+    which(is.infinite(as.matrix(vj_k)))
+  
+  iv <- iv*tau
+  
+  p1_num <- exp(vj_k+iv)
+  
+  ## I AM HERE
+  p1_num$trip <- dat$tripid_int
+  
+  p1_dom <- p1_num %>% 
+    group_by(trip) %>% 
+    summarise(across(V1:V1000, sum)) %>% 
+    rename_with(~ gsub("V", "dom_", .), starts_with("V"))
+    
+  condp_dom %<>% left_join(condp_num)
+  condp_dom %<>% dplyr::select(1:1002) 
+  
+  
+  
+
+# p1 denominator
+tmp <- dat %>% group_by(trip_id) %>% distinct(lci_p1_num) %>% summarise(lci_p1_dom = sum(lci_p1_num))
+dat %<>% left_join(tmp) 
+
+tmp <- dat %>% group_by(trip_id) %>% distinct(p1_num) %>% summarise(p1_dom = sum(p1_num))
+dat %<>% left_join(tmp) 
+
+tmp <- dat %>% group_by(trip_id) %>% distinct(uci_p1_num) %>% summarise(uci_p1_dom = sum(uci_p1_num))
+dat %<>% left_join(tmp) 
+
+any(dat$lci_p1_dom > dat$p1_dom) # FALSE
+any(dat$uci_p1_dom < dat$p1_dom) # FALSE
+
+# p1
+dat %<>%
+  mutate(lci_p1 = lci_p1_num/lci_p1_dom,
+         p1 = p1_num/p1_dom,
+         uci_p1 = uci_p1_num/uci_p1_dom)
+
+any(dat$lci_p1 > dat$p1) # TRUE
+any(dat$uci_p < dat$p1) # FALSE
+  
+  
+  
+  
+
+   
+    dat[which(dat$trip_id %in% 259), c("gridid_alt", "cset", "trip_id" ,"lci_condp", "m_condp", "uci_condp")]
+   
+    
+   f1 <- function(x) if (is.integer(x)) {x} else {x/tau}
+    
+   condp <- Vj[ , lapply(.SD, f1), .SDcols = c(cols)] # 
+    
+    
+      # dat %<>%
+      #   mutate(gridid_int = group_indices(., gridid_alt),
+      #    tripid_int = group_indices(., trip_id))  # making id integers
+    #     
+    # Vj <- as.data.table(Vj) # make data.table to save RAM
+    # cols <- colnames(Vj) # save the names of the draws for later
+    # # Vj$tau <- dat$tau
+    # Vj$ID <- as.integer(dat$gridid_int) # run function by BR
+    # # Vj$tc <- dat$fcflt_spgam # add travel cost
+    # # Vj$trip_id <- as.integer(dat$trip_id) # add trip id
+    # Vj$br <- as.integer(dat$ramp_id) # add trip id
+    
+    
+    # nx <- length(Vj) - n1
+    # nx <- length(Vj) - nx
+    #     
+    # condp_Vj <- Vj %>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
+    # # Vj %<>%  mutate(across(1:nx, ~ . / tau)) # divide utilities by tau - NESTED LOGIT ONLY
+    # 
+    # ## FOR ALL
+    #  condp_Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
+     # Vj %<>% mutate(across(1:nx, exp)) # get exponential of utility
+    
+        # Vj <- exp(Vj) # get exponential of utility
+        
+        #'[#VALIDATE: TRUE, exp(Vj) should make all values positive]
+       # identical(which(Vj < 0), integer(0))
+       which(is.infinite(as.matrix(Vj)))
+     
+     # identical(which(condp_Vj < 0), integer(0))
+     #  which(is.infinite(as.matrix(condp_Vj)))   
+    
+       
+       
+         for (i in unique(dat$cset)) {
+    cset = ifelse(dat$cset == i, 1, 0)
+    dat[,length(dat) + 1] <- cset
+    colnames(dat)[ncol(dat)] <- paste0(i, "_tau")
+  }
+       
+       
+      dat %<>% mutate(b_n_age = age,
+                      s_e_age = age,
+                      s_n_age = age) 
+    
+```
+
 
 # Error 
 Generates coefficients drawn from within the ci of each variable. Draws n1 numbers (nrow) from within a multivariate normal distribution for each variable (length); mu = vector of means, Sigma = covarience matrix
@@ -163,6 +350,7 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
 
 # Conditional probability matrix
 ```{r}
+
   dat %<>%
         mutate(gridid_int = group_indices(., gridid_alt),
          tripid_int = group_indices(., trip_id))  # making id integers
