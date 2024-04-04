@@ -130,11 +130,6 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
    condp_num %<>%  relocate(gridid, .before = 1)
    condp_num %<>%  relocate(cset, .before = 1)
    condp_num %<>%  relocate(trip, .before = 1)
-  # 
-  # condp_dom <- condp_num %>%
-  #   group_by(trip, cset) %>%
-  #   summarise(across(V1:V1000, sum)) %>%
-  #   rename_with(~ gsub("V", "dom_", .), starts_with("V"))
   
   condp_dom <- condp_num[ , lapply(.SD, sum), by = c("trip", "cset"), .SDcols = condp_num_cols]
   
@@ -183,11 +178,7 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
   p1_cols <- colnames(p1_num)
   p1_num$trip <- as.integer(dat$tripid_int)
   
-  # p1_dom <- p1_num %>% 
-  #   group_by(trip) %>% 
-  #   summarise(across(1:1000, sum))
-  # 
-   p1_dom <- p1_num[ , lapply(.SD, sum), by = trip, .SDcols = p1_cols]  # BOAT BASED
+  p1_dom <- p1_num[ , lapply(.SD, sum), by = trip, .SDcols = p1_cols]  # BOAT BASED
 
   # Use this to find p1, but you will need to change it so it deosnt chnage the current p1_dom  
   # p1_dom %<>%  left_join(p1_num, by = "trip")
@@ -261,11 +252,7 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
   p1_cols <- colnames(p1_num_sim)
   p1_num_sim$trip <- as.integer(dat$trip_id)
   
-  # p1_dom_sim <- p1_num_sim %>% 
-  #   group_by(trip) %>% 
-  #   summarise(across(1:1000, sum))
-
-   p1_dom_sim <- p1_num_sim[ , lapply(.SD, sum), by = trip, .SDcols = p1_cols]
+  p1_dom_sim <- p1_num_sim[ , lapply(.SD, sum), by = trip, .SDcols = p1_cols]
     
   # p1_dom_sim %<>%  left_join(p1_num_sim, by = "trip")
   # p1_dom_sim %<>% dplyr::select(1:1001) 
@@ -290,7 +277,7 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
 b_fishers <- dat %>% filter(trip_id %in% fishers$trip_id)
 
 # Extracting the welfare impact
-    W <- log(p1_dom_sim[, -1]) -  log(p1_dom[, -1]) # always subtract the status quo by the counterfactual (simulation)
+    W <- log(p1_dom_sim[, -1]) -  log(p1_dom[, -1]) 
     W <- t(W)/mvn_b[ ,1] # divide the logsums by the travel cost (need to pivot to do this t())
     W <- t(W) # pivot back to original orientation
     
@@ -305,9 +292,13 @@ b_fishers <- dat %>% filter(trip_id %in% fishers$trip_id)
     
     w <- dat %>% distinct(trip_id, .keep_all = TRUE)
     w %<>% mutate(fisher = ifelse(trip_id %in% fishers$trip_id, 1, 0)) 
-    w %<>% group_by(fisher) %>% summarise(lci = round(mean(lci_w), 2), mean = round(mean(m_w), 2), uci = round(mean(uci_w), 2))
+    w %<>% group_by(fisher) %>% summarise(lci = round(mean(lci_w), 2), 
+                                          mean = round(mean(m_w), 2), 
+                                          uci = round(mean(uci_w), 2))
 
     w
+    
+    write.csv(w, paste0("./data/03_data/3.1_trip_impact_", sim, "_", model, ".csv"))
 ```
 
 # ARCHIVE
