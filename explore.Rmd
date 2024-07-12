@@ -17,8 +17,6 @@ ResponseRate <- round((nAgree/(nApproached - nNE))*100) # response rate
 ```
 <br><br>
 
-> MEG Mission statement: **Optimising human use of the ocean**
-
 ***
 # Data {.tabset}
 Data for recreational marine use in daterance was collected through face-to-face surveys at boat launches.  The surveys facilitated the collection of multi-use data and multi-greement data.The survey had a **`r ResponseRate`% response rate** with **`r nAgree` participants**, of those **`r nIndPeople` survey were first instance or single agreement surveys** and **`r nMultiAgree` were multi-agreement surveys** (survey participant surveyed for a second or more times). This produced a **total of `r nSpPoints` spatial use data points**, **`r nMultiUse` of which were part of multi-use trips** (excluding first instance).

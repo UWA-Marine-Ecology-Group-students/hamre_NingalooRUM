@@ -1,0 +1,394 @@
+Nex paper plots
+
+# Setup
+```{r setup, include = FALSE}
+  rm(list = ls())
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE, cache = TRUE, fig.align = 'center', fig.width = 10, fig.height = 7) 
+
+# libraries
+library(tidyverse)
+library(readxl)
+library(magrittr)
+library(MASS)
+library(matrixStats)
+library(dplyr)
+library(data.table)
+library(gtable)
+library(gridExtra)
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+library(sf)
+library(ggspatial)
+library(ggpattern)
+library(ggnewscale)
+library(patchwork)
+library(cowplot)
+
+sim <- "sim4"
+
+# simulation 
+nex <- read_csv(paste0("./data/03_data/3.1_trip_impact_sim4_nex.csv")) # NEX
+ex <- read_csv(paste0("./data/03_data/3.1_trip_impact_sim4_nex_ex.csv")) # comprable EX for NEX
+dat <- read_csv(paste0("./data/02_data/2.1_nex_", sim, ".csv")) # NEX
+post_sim_act <- read_csv(paste0("./data/03_data/3.1_new_act_sim4_nex.csv"))
+
+# gpkg
+coast <- st_read("./data/gpkg/coast.gpkg")
+wa <- st_read("../Analysis-Hamre-Bioeconomic/spIgnore/gpkg/wa_dissolved.gpkg") %>% st_crop(xmin = 111.5, ymin = -35.19199, xmax = 129.0019, ymax = -12.5)
+# wha <- st_read("./data/gpkg/WHA.gpkg")
+wha <- st_read("./data/gpkg/ning_wha2.gpkg")
+nmp <- st_read("./data/gpkg/nmp.gpkg")
+# muiron <- st_read("./data/gpkg/murions.gpkg")
+crnp <- st_read("./data/gpkg/cape range.gpkg")
+transects <- st_read("./data/gpkg/shore_transects.gpkg")
+br <- st_read("./data/gpkg/BRs.gpkg")
+ntz <- st_read("./data/gpkg/ntz.gpkg")
+sim <- st_read("./data/gpkg/sims/sim4.gpkg")
+
+# source 
+source("./functions/theme.R")
+```
+
+# Wrangle
+```{r}
+nex$Model <- "Comprehensive"
+ex$Model <- "Standard"
+
+nex <- nex[, -1]
+ex <- ex[, -1]
+
+nex %<>% mutate(activity = ifelse(activity %in% "nex", "Non-fishers", 
+                                  ifelse(activity %in% "b_e", "Boat based\nfishers", "Shore based\nfishers")))
+ex$activity <- " Boat based\nfishers"
+
+ex %<>% rename(lci = "w.low.trip ($)",
+               mean = "w.mean.trip ($)",
+               uci = "w.upp.trip ($)")
+
+dat <- rbind(nex, ex)
+dat$activity <- fct_rev(factor(dat$activity))
+
+wplot <- ggplot(data = dat, aes(x = activity, y = mean)) +
+  geom_col(size = 5, aes(fill = Model)) +
+  geom_errorbar(aes(ymin = lci, ymax = uci), size = 0.5, width = 0.1, colour = "black", alpha = 0.5) +
+  scale_y_continuous(labels = scales::comma, limits = c(min = 0, max = 650)) +
+  scale_fill_manual(values = c("#e5a883ff", "#8fcacaff")) +
+  xlab("Users") +
+  ylab("Welfare impact per trip ($)") +
+  my_theme +
+  theme(plot.margin = margin(0.5,0.5,0.5,0.5, "cm"),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 18),
+        axis.text.x = element_text(vjust = 0),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16))
+
+
+wplot
+    
+     ggsave(path = "./plots/",
+       filename = "nex_rum_all_users.png",
+       width = 11.6,
+       height = 8.2)
+```
+
+# removing non-extractive reacreators
+```{r}
+dat %<>% filter(Users != "Non-extractive")
+
+wplot <-
+  ggplot(data = dat, aes(x = Model, y = mean)) +
+  geom_col(size = 5, fill = "#8fcacaff") +
+  geom_errorbar(aes(ymin = lci, ymax = uci), size = 0.5, width = 0.1, colour = "black", alpha = 0.5) +
+  scale_y_continuous(labels = scales::comma, limits = c(min = 0, max = 650)) +
+  scale_x_discrete(limits = rev) +
+  ylab("Welfare impact per trip ($)") +
+  my_theme +
+  theme(plot.margin = margin(0.5,0.5,0.5,0.5, "cm"),
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(vjust = 0),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16))
+
+wplot
+
+  ggsave(path = "./plots/",
+       filename = "nex_rum_ex_user.png",
+       width = 11.6,
+       height = 8.2)
+```
+# what activities people switch to
+```{r}
+post_sim_act$when <- "NTZ simulation"
+post_sim_act %<>% mutate(Mode = ifelse(str_detect(cset, "b_"), "Boat based", "Shore based")) 
+post_sim_act %<>% mutate(Activity = ifelse(str_detect(cset, "_e"), "Fishing", "Non-fishing")) 
+post_sim_act <- post_sim_act[, 5:8]
+
+percent <- c(44.6, 5, 15.9, 34.5)
+Mode <- c("Boat based", "Shore based", "Boat based", "Shore based")
+Activity <- c("Fishing", "Fishing", "Non-fishing", "Non-fishing")
+pre <- data.frame(percent, Mode, Activity)
+pre$when <- "Status quo"
+
+
+act_sub <- rbind(post_sim_act, pre)
+
+act_sub <- act_sub %>% mutate(when = factor(when, levels = c("Status quo", "NTZ simulation")))
+
+# Create the plot using facet_grid
+ggplot(act_sub, aes(fill = Mode, y = percent, x = Activity)) + 
+  geom_bar(position = "stack", stat = "identity") +
+  facet_grid(~ when) +
+  xlab("Activity") +
+  ylab("Percentage") +
+  scale_fill_manual(values = c("#8fcacaff", "#e5a883ff")) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 20),
+        axis.text = element_text(size = 18),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        strip.text = element_text(size = 18))
+
+  ggsave(path = "./plots/",
+       filename = "act_sub.png",
+       width = 11.6,
+       height = 8.2)
+```
+
+# Amount of data 
+```{r}
+comp <- dat %>% filter(choice == 1)
+
+# comprehensive model
+comp_data <- ggplot(data = comp, aes(x = cset)) + 
+  geom_bar(fill = "#e5a883ff") +
+  scale_x_discrete(labels = c("Boat based\nfishing", "Boat based\nnon-fishing activities", "Shore based\nfishing", "Shore based\nnon-fishing activies")) +
+  xlab("Activity") +
+  ylab("Number of\nrecreators") +
+  my_theme +
+  theme(plot.margin = margin(0.5,0.5,0.5,0.5, "cm"),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 16, colour = "black"),
+        axis.text.x = element_text(vjust = 1),
+        axis.title.x = element_text(vjust = -2))
+
+  ggsave(path = "./plots/",
+       filename = "comp_dat.png",
+       width = 11,
+       height = 4)
+  
+  # fishing model
+b_e <- comp %>% filter(cset %in% "b_e")
+  
+  b_e_data <- ggplot(data = b_e, aes(x = cset)) + 
+  geom_bar(fill = "#8fcacaff") +
+  scale_x_discrete(labels = c("Boat based fishing")) +
+  xlab("Activity") +
+  ylab("Number of\nrecreators") +
+  my_theme +
+  theme(plot.margin = margin(0.5,0.5,0.5,0.5, "cm"),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 16, colour = "black"),
+        axis.text.x = element_text(vjust = 1),
+        axis.title.x = element_text(vjust = -2))
+
+  ggsave(path = "./plots/",
+       filename = "b_e_dat.png",
+       width = 11,
+       height = 4)
+```
+
+# map of sampling and study site
+```{r}
+    WA_inset <-
+    ggplot() +
+      geom_sf(data = wa, lwd = 0.07) +
+      annotate("text", x = 122.181, y = -26, label = "Western\nAustralia", size = 3) +
+      annotate("text", x = 114.5, y = -15, label = "a)", size = 4) +
+       annotate("rect", xmin = 113.4, xmax = 114.8, ymin = -24.03, ymax = -21.52, 
+                   fill =  NA, colour = "black")  +
+      xlab("") + ylab("") +
+      theme_classic() +
+      theme(
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        plot.margin = margin(0, 0, -1, -1, "cm")
+        # panel.border = element_rect(fill = NA, colour = "grey", size = 1)
+      )
+ 
+# without wha   
+     # wha %<>% mutate(id = row_number()) %>% mutate(mp = ifelse(id %in% c(6, 8), "Commonwealth", "State")) %>% filter(id %in% c(6, 8, 9))
+     # ntz %<>% mutate(Zone = "No-take zones") 
+
+# main_map <- ggplot() +
+#   geom_sf(data = coast, lwd = 0.1) +
+#   geom_sf(data = wha, lwd = 0.1, aes(fill = mp)) +
+#   scale_fill_manual(name = "Ningaloo Marine Park",
+#                     breaks = c("Commonwealth", "State"),
+#                     values = c("Commonwealth" = "#a7c1faff", "State" = "#add8e7ff"),
+#                     labels = c("Commonwealth", "State")) +
+#   # geom_sf(data = ntz, lwd = 0.1, fill = "#87d083ff") +
+#   new_scale_fill() +
+#   geom_sf(data = ntz, lwd = 0.1, aes(fill = Zone)) +
+#   scale_fill_manual(name = "",
+#                     breaks = c("No-take zones"),
+#                     values = c("No-take zones" = "#87d083ff"),
+#                     labels = c("No-take zones")) +
+#   geom_sf(data = crnp, lwd = 0.1) +
+#   geom_sf(data = transects, aes(colour = Transect)) +
+#   scale_colour_manual(name = "Boat ramps and\nassociated\nshore transects",
+#                     breaks = c("Tantabiddi", "Bundegi", "Exmouth", "Coral Bay"),
+#                     values = c("Tantabiddi" = "#e66363ff", "Bundegi" = "#bb69c1ff", "Exmouth" = "#31bcc8ff", "Coral Bay" = "#e83da5ff"),
+#                     labels = c("Tantabiddi", "Bundegi", "Exmouth", "Coral Bay")) +
+#   guides(fill = guide_legend(byrow = TRUE)) +
+#   geom_sf(data = br, aes(colour = Boat.ramp)) +
+#   annotate("text", x = 113.925, y = - 22.175, label = "CRNP", size = 3, angle = 75) +
+#   annotate("text", x = 114.3, y = - 22.175, label = "Exmouth\nGulf", size = 3) +
+#   xlab("Longitutde") + ylab("Latitude") +
+#   theme_classic() +
+#   theme(
+#     axis.text.x = element_text(angle = 90),
+#     plot.margin = margin(0.5, 1, 1, 1, "cm"),
+#     axis.title.x = element_text(vjust = -1.5),
+#     axis.title.y = element_text(vjust = 5),
+#     legend.title = element_text(size = 10)
+#   ) +
+#   annotation_scale(location = "bl", pad_x = unit(1.25, "cm"), pad_y = unit(0.75, "cm"), height = unit(2.5, "mm"), text_cex = 0.6, bar_cols = c("#434343", "white"), line_width = 0.5) +
+#   annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(1.80, "cm"), pad_y = unit(1.25, "cm"), 
+#                          style = north_arrow_orienteering(line_width = 0.5, text_size = 6, line_col = "#434343", fill = c("white", "#434343"), text_col = "#434343"),
+#                          height = unit(0.75, "cm"), width = unit(0.75, "cm")) 
+
+## with wha
+     # wha %<>% mutate(id = row_number()) %>% mutate(mp = ifelse(id %in% c(6, 8), "Commonwealth", "State")) %>% filter(id %in% c(6, 8, 9))
+     wha <- wha %>%
+        mutate(group = ifelse(is.na(name) | name == "Ningaloo Marine Park (Commonwealth)", "Ningaloo Marine Park (Commonwealth)", name)) %>%
+        group_by(group) %>%
+        summarize(geometry = st_union(geom), area = sum(area, na.rm = TRUE)) %>%
+        ungroup()
+
+     ntz %<>% mutate(Zone = "No-take zones") 
+
+main_map <- ggplot() +
+  geom_sf(data = coast, lwd = 0.1) +
+  geom_sf(data = wha, lwd = 0.1, aes(fill = group)) +
+  scale_fill_manual(name = "Ningaloo World\nHeritage Area",
+                    breaks = c("Ningaloo Marine Park (Commonwealth)", "Ningaloo Marine Park (state)", "Cape Range National Park", "Muiron Islands Marine Management Area"),
+                    values = c("Ningaloo Marine Park (Commonwealth)" = "#a7c1faff", "Ningaloo Marine Park (state)" = "#add8e7ff", "Cape Range National Park" = "grey", "Muiron Islands Marine Management Area" = "#7ce6d0"),
+                    labels = c("Ningaloo Marine Park\n(Commonwealth)", "Ningaloo Marine Park\n(State)", "Cape Range\nNational Park", "Muiron Islands Marine\nManagement Area")) +
+  # geom_sf(data = ntz, lwd = 0.1, fill = "#87d083ff") +
+  guides(fill = guide_legend(byrow = TRUE)) +
+  new_scale_fill() +
+  geom_sf(data = ntz, lwd = 0.1, aes(fill = Zone)) +
+  scale_fill_manual(name = "",
+                    breaks = c("No-take zones"),
+                    values = c("No-take zones" = "#87d083ff"),
+                    labels = c("No-take zones")) +
+  # geom_sf(data = crnp, lwd = 0.1) +
+  geom_sf(data = transects, aes(colour = Transect)) +
+  scale_colour_manual(name = "Boat ramps and\nassociated\nshore transects",
+                    breaks = c("Tantabiddi", "Bundegi", "Exmouth", "Coral Bay"),
+                    values = c("Tantabiddi" = "#e66363ff", "Bundegi" = "#bb69c1ff", "Exmouth" = "#31bcc8ff", "Coral Bay" = "#e83da5ff"),
+                    labels = c("Tantabiddi", "Bundegi", "Exmouth", "Coral Bay")) +
+  guides(fill = guide_legend(byrow = TRUE)) +
+  geom_sf(data = br, aes(colour = Boat.ramp)) +
+  # annotate("text", x = 113.925, y = - 22.175, label = "CRNP", size = 3, angle = 75) +
+  annotate("text", x = 114.3, y = - 22.175, label = "Exmouth\nGulf", size = 3) +
+  xlab("Longitutde") + ylab("Latitude") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    plot.margin = margin(0.5, 1, 1, 1, "cm"),
+    axis.title.x = element_text(vjust = -1.5),
+    axis.title.y = element_text(vjust = 5),
+    legend.title = element_text(size = 10)
+  ) +
+  annotation_scale(location = "bl", pad_x = unit(1.25, "cm"), pad_y = unit(0.90, "cm"), height = unit(2.5, "mm"), text_cex = 0.6, bar_cols = c("#434343", "white"), line_width = 0.5) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(2, "cm"), pad_y = unit(1.25, "cm"), 
+                         style = north_arrow_orienteering(line_width = 0.5, text_size = 6, line_col = "#434343", fill = c("white", "#434343"), text_col = "#434343"),
+                         height = unit(0.75, "cm"), width = unit(0.75, "cm")) 
+
+map <- ggdraw() +
+  draw_plot(main_map) +
+  # draw_plot(WA_inset, x = 0.7, y = 0.755, width = 0.2, height = 0.2)
+  draw_plot(WA_inset, x = 0.455, y = 0.2, width = 0.2, height = 0.2)
+
+
+ ggsave(path = "./plots/",
+       filename = "map.png",
+       width = 8,
+       height = 8)
+```
+
+# sim map
+```{r}
+     ntz %<>% mutate(Zone = "NTZ") 
+    ntz <- ntz[,-1]
+    sim$Zone <- "NTZ Simulation"
+    sim %<>%  st_transform(st_crs(ntz))
+    ntz <- rbind(ntz, sim)
+
+sim_map <- ggplot() +
+  geom_sf(data = coast, lwd = 0.1) +
+  geom_sf(data = wha, lwd = 0.1, aes(fill = group)) +
+  scale_fill_manual(name = "Ningaloo World\nHeritage Area",
+                    breaks = c("Ningaloo Marine Park (Commonwealth)", "Ningaloo Marine Park (state)", "Cape Range National Park", "Muiron Islands Marine Management Area"),
+                    values = c("Ningaloo Marine Park (Commonwealth)" = "#a7c1faff", "Ningaloo Marine Park (state)" = "#add8e7ff", "Cape Range National Park" = "grey", "Muiron Islands Marine Management Area" = "#7ce6d0"),
+                    labels = c("Ningaloo Marine Park\n(Commonwealth)", "Ningaloo Marine Park\n(State)", "Cape Range\nNational Park", "Muiron Islands Marine\nManagement Area")) +
+  # geom_sf(data = ntz, lwd = 0.1, fill = "#87d083ff") +
+  guides(fill = guide_legend(byrow = TRUE)) +
+  new_scale_fill() +
+  geom_sf(data = ntz, lwd = 0.1, aes(fill = Zone)) +
+  scale_fill_manual(name = "",
+                    breaks = c("No-take zones", "NTZ Simulation"),
+                    values = c("No-take zones" = "#87d083ff", "NTZ Simulation" = "orange"),
+                    labels = c("Current no-take\nzones", "No-take zones\nsimulation")) +
+  guides(fill = guide_legend(byrow = TRUE)) +
+    geom_sf(data = br, aes(colour = Boat.ramp)) +
+    scale_colour_manual(name = "Boat ramps",
+                    breaks = c("Tantabiddi", "Bundegi", "Exmouth", "Coral Bay"),
+                    values = c("Tantabiddi" = "#e66363ff", "Bundegi" = "#bb69c1ff", "Exmouth" = "#31bcc8ff", "Coral Bay" = "#e83da5ff"),
+                    labels = c("Tantabiddi", "Bundegi", "Exmouth", "Coral Bay")) +
+  annotate("text", x = 114.3, y = - 22.175, label = "Exmouth\nGulf", size = 3) +
+  xlab("Longitutde") + ylab("Latitude") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    plot.margin = margin(0.5, 1, 1, 1, "cm"),
+    axis.title.x = element_text(vjust = -1.5),
+    axis.title.y = element_text(vjust = 5),
+    legend.title = element_text(size = 10)
+  ) +
+  annotation_scale(location = "bl", pad_x = unit(1.25, "cm"), pad_y = unit(0.90, "cm"), height = unit(2.5, "mm"), text_cex = 0.6, bar_cols = c("#434343", "white"), line_width = 0.5) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(2, "cm"), pad_y = unit(1.25, "cm"), 
+                         style = north_arrow_orienteering(line_width = 0.5, text_size = 6, line_col = "#434343", fill = c("white", "#434343"), text_col = "#434343"),
+                         height = unit(0.75, "cm"), width = unit(0.75, "cm")) 
+
+map <- ggdraw() +
+  draw_plot(sim_map) +
+  # draw_plot(WA_inset, x = 0.7, y = 0.755, width = 0.2, height = 0.2)
+  draw_plot(WA_inset, x = 0.455, y = 0.2, width = 0.2, height = 0.2)
+
+
+ ggsave(path = "./plots/",
+       filename = "sim_map.png",
+       width = 8,
+       height = 8)
+ 
+ ## area
+ ntz %<>% st_make_valid()
+ ntz %<>% mutate(area = st_area(geom)) 
+ ntz %<>% mutate(area = as.numeric(area/1000)) 
+ ntz %<>% group_by(Zone) %>% summarise(area = sum(area))
+ ntz %<>% st_drop_geometry()
+ exp <- ntz[2, 2] - ntz[1, 2]
+ t <- ntz[1, 2]/ntz[2, 2]
+ 
+```
+
+
+

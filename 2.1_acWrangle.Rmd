@@ -82,7 +82,7 @@ This script creates a grid with associated attributes from a ASC RUM.
     bl_mod <- readRDS("./models/bl_mod.rda")
     
     # simulation
-    sim_name <- "sim3"       #'[#NOTE: check simulation name]
+    sim_name <- "sim4"       #'[#NOTE: check simulation name]
     # 
     # sim <- st_read(paste0("./data/gpkg/sims/asc_", sim_name, ".gpkg")) %>% 
     #   st_transform(crs = 4283)
@@ -222,8 +222,8 @@ All data filters have to be done before making the choice set.
       mutate(dem_only = ifelse(Dem_bin == 1 & Pel_bin == 0 & nrSh_bin == 0 & Mol_bin == 0 &
                                  Crust_bin == 0, 1, 0)) %>% 
 
-      # filter(ActivityType == "Extractive") %>% # filtering activity
-      filter(FishingType %in% c("Demersal", "Casting")) %>% # fishing RUM
+      filter(ActivityType == "Extractive") %>% # filtering activity
+      # filter(FishingType %in% c("Demersal", "Casting")) %>% # fishing RUM
       filter(SiteType %in% "Boat") %>% # filtering activity
       filter(str_detect(Site, "BR"))
       

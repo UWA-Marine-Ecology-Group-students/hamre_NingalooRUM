@@ -37,7 +37,7 @@ rm(list = ls())
     BRtrips <- readRDS("./data/gpkg/2.1_BRtrips.gpkg") %>% # from BRtrips.R
       st_transform(crs = 4283 )%>% st_make_valid()
     
-    # npz <- st_read("./data/gpkg/wha_ntz_no_shore_fishing.gpkg") %>% 
+    # npz <- st_read("./data/gpkg/wha_ntz_no_shore_fishing.gpkg") %>%
     #   st_transform(crs = 4283) %>% st_make_valid()
     
     # npz <- st_read("./data/gpkg/ntz.gpkg") %>%
@@ -419,6 +419,8 @@ dat %<>%
 
 
 rm(boat2L, boat3L, temp, gam_cons, sp_cons, cons_mod, tmp, bl_mod, lm_ann_inc, boat_perf, gam_sp)
+
+dat[which(dat$Activity %in% "Other"), ]
 ```
 
 # Filtering
@@ -433,7 +435,7 @@ dat %<>%
   mutate(FishingType = ifelse(FishingType %in% "Casting" & SiteType %in% "Boat" | FishingType %in% "Squidding", "Nearshore", FishingType)) %>% 
   mutate(FishingType = ifelse(FishingType %in% "Demersal" & SiteType %in% "Shore", "Casting", FishingType)) %>% 
   mutate(FishingType = ifelse(is.na(FishingType) & SiteType %in% "Shore" & ActivityType %in% "Extractive", "Casting", FishingType)) %>% 
-  filter(!(Activity %in% "Other"))  %>% 
+  # filter(!(Activity %in% "Other"))  %>% 
   filter(!(Activity %in% "Fishing") & ActivityType %in% "Non-Extractive" | ActivityType %in% "Extractive") %>% 
   mutate(Activity = ifelse(Activity %in% "Fishing", FishingType, Activity))
 
@@ -454,7 +456,7 @@ dat %<>%
       slice(which.max(decDuration)) %>% 
       ungroup() 
     
-      dat <- st_crop(dat, grid_base) # removing outliers 
+      dat <- st_crop(dat, grid_base) # removing outliers
     
       #'[#VALIDATE: TRUE, no duplicated trip IDs)]
       identical((which(duplicated(dat$TripID) == TRUE)), integer(0)) == TRUE
@@ -536,19 +538,16 @@ a[, c("Site", "ipw")]
 ```{r}
 b_ex_dat <- dat %>% filter(ActivityType %in% "Extractive" & SiteType %in% "Boat" & str_detect(Site, "BR"))
 # # 
-# b_ex <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = b_ex_dat, from = 0.03, 
-#                 by = 0.02, crs = 4283, vert = FALSE)
+# b_ex <- ASCgrid(poly = grid_base, sz_current = npz, sz_sim = sim, point = b_ex_dat, from = 0.03,
+                # by = 0.02, crs = 4283, vert = FALSE)
 # 
 # 
 # b_ex %<>% st_transform(crs = 4283) %>% st_cast("MULTIPOLYGON")
 # 
 # st_write(b_ex, paste0("./data/gpkg/sims/2.1_asc_manual_edit_", g1, "_", sim_name, "_4283.gpkg"), append = FALSE) # need to write with st_write to open in QGISRUMs
 
-   b_ex <- st_read(paste0("./data/gpkg/","b_ex_grid_", sim_name, "_qgis.gpkg")) %>%
+   b_ex <- st_read(paste0("./data/gpkg/","b_ex_grid_", sim_name, "_qgis_v2.gpkg")) %>%
       st_transform(crs = 4283) %>% st_make_valid()
-   
-ggplot()+
-  geom_sf(data = b_ex_dat, aes(colour = Site))
 ```
 
 ### Atrributes
@@ -599,7 +598,7 @@ ggplot()+
       geom_sf(data = b_ex$centroid, size = 0.5, colour = "red") + theme_classic()
     
   
-  b_ex %<>% filter(!(gridid_alt %in% "b_ex_48"))  # empty
+  # b_ex %<>% filter(!(gridid_alt %in% "b_ex_48"))  # empty
   
 ## NON-LINEAR DISTANCE FROM BR TO CENTROID
   # create distance matrix from every ramp to every grid
@@ -621,10 +620,8 @@ b_ex_dist %<>%
   ## GRID GEOMETRIES
   
   b_ex %<>% 
-    rename(geom_asc = geom,
-                   geom_cent = centroid)
-    
-  # 
+    rename(geom_asc = geom, geom_cent = centroid)
+
   BRtrips %<>% ## Appending BRtrips
     rename(geom_br = geometry) %>%
     as.data.frame() %>%
@@ -663,9 +660,14 @@ b_ex_dist %<>%
     
     # REMOVE INVALID CELLS
 ##'[#NOTE:Check empty grids before removing]
+
     
   # Remove current sz and cells with no data presnet
-    b_ex %<>% filter(sz_current == 0 & use_count != 0)
+    # b_ex %<>% filter(sz_current == 0 & use_count != 0)
+    b_ex %<>% mutate(sz_current = ifelse(is.na(sz_current), 0, sz_current))
+    b_ex %<>% mutate(sz = ifelse(is.na(sz), 0, sz))
+    
+    b_ex %<>% filter(sz_current == 0)
 
   # plot should have no zeros and check data to make sure
     ggplot() +
@@ -694,17 +696,17 @@ b_ex_dist %<>%
      ggplot()+
      geom_sf(data = b_ex, aes(fill = gridid_alt))
    # 
-    offshore <- b_ex %>% 
-     filter(gridid_alt %in% c("b_ex_8", "b_ex_9", "b_ex_10", "b_ex_11", "b_ex_25", "b_ex_12", "b_ex_6", "b_ex_7", "b_ex_56", "b_ex_13", "b_ex_14", "b_ex_15", "b_ex_21", "b_ex_29"))
+    # offshore <- b_ex %>% 
+    #  filter(gridid_alt %in% c("b_ex_8", "b_ex_9", "b_ex_10", "b_ex_11", "b_ex_25", "b_ex_12", "b_ex_6", "b_ex_7", "b_ex_56", "b_ex_13", "b_ex_14", "b_ex_15", "b_ex_21", "b_ex_29"))
     
-   ggplot()+
-     geom_sf(data = b_ex) +
-     geom_sf(data = offshore, fill = "red")
+   # ggplot()+
+   #   geom_sf(data = b_ex) +
+   #   geom_sf(data = offshore, fill = "red")
    
-    b_ex %<>% mutate(offshore = ifelse(gridid_alt %in% offshore$gridid_alt, 1, 0))
+    # b_ex %<>% mutate(offshore = ifelse(gridid_alt %in% offshore$gridid_alt, 1, 0))
     
-      ggplot()+
-     geom_sf(data = b_ex, aes(fill = offshore))
+     #  ggplot()+
+     # geom_sf(data = b_ex, aes(fill = offshore))
     
     ## EAST/WEST
     ggplot()+
@@ -726,9 +728,18 @@ b_ex_dist %<>%
       mutate(br_site = ifelse(br_site %in% "w", "n_w", br_site)) %>% 
       mutate(br_site = ifelse(cent_lat < -22.75, "s_w", br_site))
     
-    ggplot() +
-      geom_sf(data = b_ex$geom_asc, aes(fill = b_ex$br_site))
+
+    # ggplot() +
+      # geom_sf(data = b_ex$geom_asc, aes(fill = b_ex$br_site))
     
+    b_ex %<>% filter(!(gridid_alt %in% "b_ex_48")) # rogue line
+ 
+    a <- b_ex %>% filter(use_count == 0 )
+ 
+    ggplot() +
+   # geom_sf(data = b_ex$geom_asc) +
+   geom_sf(data = b_ex$geom_asc, aes(fill = as.factor(b_ex$use_count)))
+ 
 ```
 
 ## b_nex
@@ -744,6 +755,10 @@ b_nex_dat <- dat %>% filter(ActivityType %in% "Non-Extractive" & SiteType %in% "
 
    b_nex <- st_read(paste0("./data/gpkg/", "b_nex_grid_", sim_name, "_qgis.gpkg")) %>%
       st_transform(crs = 4283) %>% st_make_valid()
+   
+   ggplot()+
+     geom_sf(data = b_nex) +
+     geom_sf(data = b_nex_dat)
 ```
 
 ### Attributes
@@ -915,6 +930,32 @@ ggplot()+
     
     ggplot() +
       geom_sf(data = b_nex$geom_asc, aes(fill = b_nex$br_site))
+
+    ## adding conglometrated b_nes set
+    
+    b_nex %<>% 
+      mutate(gridid_alt2 = ifelse(str_detect(gridid_alt, "b_nex") & br_site %in% "e", 
+                              paste("b_nex2", 1, sep = "_"), NA)) %>% 
+      mutate(gridid_alt2 = ifelse(str_detect(gridid_alt, "b_nex") & br_site %in% "n_w", 
+                              paste("b_nex2", 2, sep = "_"), gridid_alt2)) %>% 
+      mutate(gridid_alt2 = ifelse(str_detect(gridid_alt, "b_nex") & br_site %in% "s_w", 
+                              paste("b_nex2", 3, sep = "_"), gridid_alt2))
+
+    
+   b_nex %<>%
+     mutate(gridid2_b_nex_1 = ifelse(gridid_alt2 %in% "b_nex2_1", 1, 0)) %>% 
+     mutate(gridid2_b_nex_2 = ifelse(gridid_alt2 %in% "b_nex2_2", 1, 0)) %>% 
+     mutate(gridid2_b_nex_3 = ifelse(gridid_alt2 %in% "b_nex2_3", 1, 0)) 
+   
+   
+    b_nex_grid <- b_nex %>%
+      dplyr::select(gridid_alt2, geom_asc) %>%
+      distinct()
+
+    # allocating sites to grids
+    b_nex_dat %<>% 
+      st_join(b_nex_grid, left = T, join = st_intersects) %>% 
+      rename(gridid_vis2 = gridid_alt2)
 ```
 
 
@@ -1192,6 +1233,32 @@ s_nex_dat %<>%
     ggplot() +
       geom_sf(data = s_nex_buff$geom_asc, aes(fill = s_nex_buff$br_site))
     
+       ## adding conglometrated b_nes set
+    
+    s_nex_buff %<>% 
+      mutate(gridid_alt2 = ifelse(str_detect(gridid_alt, "s_nex") & br_site %in% "e", 
+                              paste("s_nex2", 1, sep = "_"), NA)) %>% 
+      mutate(gridid_alt2 = ifelse(str_detect(gridid_alt, "s_nex") & br_site %in% "n_w", 
+                              paste("s_nex2", 2, sep = "_"), gridid_alt2)) %>% 
+      mutate(gridid_alt2 = ifelse(str_detect(gridid_alt, "s_nex") & br_site %in% "s_w", 
+                              paste("s_nex2", 3, sep = "_"), gridid_alt2))
+
+    
+   s_nex_buff %<>%
+     mutate(gridid2_s_nex_1 = ifelse(gridid_alt2 %in% "s_nex2_1", 1, 0)) %>% 
+     mutate(gridid2_s_nex_2 = ifelse(gridid_alt2 %in% "s_nex2_2", 1, 0)) %>% 
+     mutate(gridid2_s_nex_3 = ifelse(gridid_alt2 %in% "s_nex2_3", 1, 0)) 
+   
+        
+  s_nex_grid <- s_nex_buff %>%
+      dplyr::select(gridid_alt2, geom_asc) %>%
+      distinct()
+
+    # allocating sites to grids
+    s_nex_dat %<>% 
+      st_join(s_nex_grid, left = T, join = st_intersects) %>% 
+      rename(gridid_vis2 = gridid_alt2)
+    
     rm(b_ex_dist, b_ex_grid, c, centroid, coast, s_ex_cent, s_ex_grid, s_ex_line, s_nex_cent, s_nex_grid, s_nex_line, sh_asc_base, snap_geom, gridid, i, depth_range, dist, st_centroid_within_poly, st_snap_points, b_nex_dist, b_nex_grid)
 ```
 
@@ -1240,7 +1307,7 @@ cset %<>% clean_names()
     
       
     b_nex_dat %<>% 
-      dplyr::select(trip_id, person_id, gridid_vis, ramp_name, ipw, cost, ipw, boat_access,
+      dplyr::select(trip_id, person_id, gridid_vis, gridid_vis2, ramp_name, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
                     ex_times12m, resident,accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
@@ -1254,7 +1321,7 @@ cset %<>% clean_names()
       as.data.frame()
             
     s_nex_dat %<>% 
-      dplyr::select(trip_id, person_id, gridid_vis, ipw, cost, ipw, boat_access,
+      dplyr::select(trip_id, person_id, gridid_vis, gridid_vis2, ipw, cost, ipw, boat_access,
                     cons_flt, sp_flt, cons2l, sp2l, cons3l, sp3l, gam_cons, gam_sp, vott, ann_inc, age,
                     ex_times12m, resident,accom, geom_accom, geometry, use_long, use_lat) %>%
       distinct() %>% 
@@ -1341,6 +1408,10 @@ rum_dat %<>% left_join(land_dists)
 
 ## Travel cost & choice
 ```{r}
+## fixing conglomerate
+  rum_dat %<>% mutate(gridid_alt2 = ifelse(is.na(gridid_alt2), gridid_alt, gridid_alt2))
+  rum_dat %<>% mutate(gridid_vis2 = ifelse(is.na(gridid_vis2), gridid_vis, gridid_vis2))
+
 # Choice col
 rum_dat %<>%
   mutate(b_choice = ifelse(str_detect(gridid_vis, "b_") & 
@@ -1349,11 +1420,26 @@ rum_dat %<>%
                            gridid_vis == gridid_alt, 1, NA)) %>% 
   mutate(choice = ifelse(b_choice == 1 | s_choice == 1, 1, NA)) %>% 
   mutate(choice = ifelse(is.na(choice), 0, choice)) %>% 
-  mutate(choice_fct = as.factor(choice))
-  # choice
+  mutate(choice_fct = as.factor(choice)) # choice
+
+rum_dat %<>% mutate(ID = row_number()) 
+tmp <- rum_dat %>% group_by(trip_id) %>% distinct(gridid_alt2, .keep_all = TRUE)
+tmp %<>% mutate(choice2 = ifelse(gridid_alt2 == gridid_vis2, 1, 0))
+tmp %<>% mutate(rum2 = 1)
+rum_dat %<>% left_join(tmp[, c("ID", "rum2")], by = "ID")
+
+tmp %<>% filter(choice2 == 1)
+rum_dat %<>% left_join(tmp[, c("ID", "choice2")], by = "ID")
+rum_dat %<>% mutate(choice2 = ifelse(is.na(choice2), 0, choice2))
+rum_dat %<>% mutate(rum2 = ifelse(is.na(rum2), 0, rum2))
+
 
     #'[#VALIDATE: TRUE, should equal number of trips]
     sum(rum_dat$choice) == n_distinct(rum_dat$trip_id)
+    sum(rum_dat$choice2) == n_distinct(rum_dat$trip_id)
+    
+# Adding in columns and grid id for conglomerate nex grids
+rum_dat$cset <- substr(rum_dat$gridid_alt, 1, 3) # making choice set col to nest
 
 # Travel cost
 rum_dat %<>%
@@ -1362,6 +1448,7 @@ rum_dat %<>%
       
          # fuel cost
         mutate(fc_flt = round(as.numeric((cost/cons_flt)*total_km), 2)) %>% # calc fuel cost
+        mutate(fc_flt = ifelse(cset %in% c("s_n", "s_e"), (cost*0.111)*nl_land_km, fc_flt)) %>% # calc fuel cost
         # mutate(fc2l = round(as.numeric((cost/cons2l)*km_BR), 2)) %>%
         # mutate(fc3l = round(as.numeric((cost/cons3l)*km_BR), 2)) %>%
         # mutate(fc_gam = round(as.numeric((cost/gam_cons)*km_BR), 2)) %>%
@@ -1389,10 +1476,16 @@ rum_dat %<>%
         # mutate(fcflt_sp2l = round(as.numeric(fc_flt + trp_vott2l), 2)) %>% 
         # mutate(fcflt_sp3l = round(as.numeric(fc_flt + trp_vott3l), 2)) %>% 
         mutate(fcflt_spgam = round(as.numeric(fc_flt + trp_vott_gam), 2)) ## policy mod
+
+av_tc <- rum_dat %>% group_by(cset, br_site) %>% summarise(av_tc = mean(fcflt_spgam))
+
+rum_dat %<>% left_join(av_tc) 
+
+rum_dat %<>% mutate(tc = ifelse(cset %in% c("b_e", "s_e"), fcflt_spgam, av_tc))
 ```
+
 ## Zone
 ```{r}
-rum_dat$cset <- substr(rum_dat$gridid_alt, 1, 3) # making choice set col to nest
 rum_dat$b_s_set <- substr(rum_dat$gridid_alt, 1, 1) # making choice set col to nest: try just boat vs shore
 rum_dat$n_e_set <- substr(rum_dat$gridid_alt, 3, 3) # making choice set col to nest: try just ex vs nex
 
@@ -1436,7 +1529,10 @@ Individual id cols e.g., gridid_b_ex_1 have lots of NA where they have appended 
 ```{r}
 rum_dat %<>% 
   mutate(across(contains('gridid_b'), replace_na, 0)) %>% 
-  mutate(across(contains('gridid_s'), replace_na, 0))
+  mutate(across(contains('gridid_s'), replace_na, 0)) %>% 
+  mutate(across(contains('gridid2_b'), replace_na, 0)) %>% 
+  mutate(across(contains('gridid2_s'), replace_na, 0)) %>% 
+  mutate(across(contains('rum2'), replace_na, 0))
 
 # check for NAs
 summary(rum_dat[, c("choice", "choice_fct", "fcflt_spgam", "ipw", "trip_id", "gridid_alt")]) # make sure no NAs
@@ -1458,7 +1554,6 @@ fish_dat <- rum_dat %>%
 
 # Save
 ```{r save}
-
 rum_dat_no_geom <- rum_dat %>% dplyr::select(-c(geom_accom, geometry, geom_asc, geom_cent, geom_br, geom_finish))
 
 fish_dat_no_geom <- fish_dat %>% dplyr::select(-c(geom_accom, geometry, geom_asc, geom_cent, geom_br, geom_finish))
@@ -1469,3 +1564,4 @@ fish_dat_no_geom <- fish_dat %>% dplyr::select(-c(geom_accom, geometry, geom_asc
     write_csv(fish_dat, paste0("./data/02_data/2.1_nex_ex_", sim_name,".csv")) # for 3.1?
     write_csv(fish_dat_no_geom, paste0("./data/02_data/2.1_nex_ex_", sim_name,"_stata.csv")) # for stata?
 ```
+

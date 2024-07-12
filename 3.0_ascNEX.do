@@ -22,11 +22,13 @@
 	
 **# data prep
 	gen fchoice = choice == 1 // make factors
+	gen fchoice2 = choice2 == 1 // make factors
 	destring *, ignore("NA") replace // change strings to numeric
 	gen fn_sz = n_sz == 1 // make factors
 	gen fsn_sz = n_sz == 1 // make factors
 	gen fbn_sz = n_sz == 1 // make factors
 	gen fres = resident == 1 // make factors
+	gen frum2 = rum2 == 1 // make factors
 	
 ********************** Comprehensive RUM with Non-extractive users
 
@@ -99,25 +101,57 @@
 //	
 // 	nlogit fchoice c.fcflt_spgam || lvl1: || lvl2: || gridid_alt:, case(trip_id) // no convergence - but taus below 1
 	
-	
 * was the final model - store full model output inc confidenec intervals - although this is not what i need
 // putexcel set nex.xlsx, replace
-// nlogit fchoice c.fcflt_spgam || cset: || gridid_alt:, case(trip_id) // nested logit
+ nlogit fchoice c.fcflt_spgam || cset: || gridid_alt:, case(trip_id) // tc significant
+ estimates store basic
+ 
 // putexcel (A1) = etable
 
 
 // Trying to add variables to describe the choice of the cset
 ** need a significant travel cost - choose best model 
 
-nlogit fchoice c.fcflt_spgam || cset: age || gridid_alt:, case(trip_id) // sign tc
+//  nlogit fchoice c.fcflt_spgam || cset: age|| gridid_alt:, case(trip_id) // tc significant
+//  estimates store age
+// 
+//
+//  nlogit fchoice c.fcflt_spgam || cset: ex_times12m || gridid_alt:, case(trip_id) // tc not significant
+//  estimates store ex_times12m
+// 
+//
+//  nlogit fchoice c.fcflt_spgam || cset: fres || gridid_alt:, case(trip_id) //tc not significant
+//  estimates store res
+// 
+// estimates stats basic age ex_times12m res
+// 	
+
+	
+	
+* was the final model - store full model output inc confidenec intervals - although this is not what i need
+// putexcel set nex.xlsx, replace
+
+//  nlogit fchoice2 c.tc if frum2 == 1 || cset: || gridid_alt2:, case(trip_id) // tc not significant
+//  estimates store basic
+
+// putexcel (A1) = etable
+
+
+// Trying to add variables to describe the choice of the cset
+** need a significant travel cost - choose best model 
+/*
+ nlogit fchoice2 c.tc if frum2 == 1 || cset: age || gridid_alt2:, case(trip_id) // tc not significant
 estimates store age
 
-// nlogit fchoice c.fcflt_spgam || cset: ex_times12m || gridid_alt:, case(trip_id) // lest signifuicant?
-// estimates store ex_times12m
+ nlogit fchoice2 c.tc if frum2 == 1 || cset: ex_times12m|| gridid_alt2:, case(trip_id) // tc not significant
+ estimates store ex_times12m
 
 
-// nlogit fchoice c.fcflt_spgam || cset: fres  || gridid_alt:, case(trip_id) // not sig tc
-// estimates store res
+ nlogit fchoice2 c.tc if frum2 == 1 || cset: fres|| gridid_alt2:, case(trip_id) //  tc not significant
+ 
+estimates stats basic age ex_times12m res // exTime12m the lowest but tc not significant
+*/
+ 
 //
 // nlogit fchoice c.fcflt_spgam || cset: fres ex_times12m || gridid_alt:, case(trip_id) // not sig tc
 // estimates store res
@@ -127,31 +161,31 @@ estimates store age
 
 **# Postestimation
 
-// estimates store nex // store coefs
-// estat alternatives // display summarys for alts
+ estimates store nex // store coefs
+estat alternatives // display summarys for alts
 //
-//* keep if zone_rm == 0 // filters data
-// predict p* // predict p1: pr of choosen site, and p2: pr of choosen nest
-// predict condp, condp hlevel(2) // predict condp: pr of choosing site given nest
-// predict iv, iv // predict inclusive value for nest (log of dom of condp)
+keep if zone_rm == 0 // filters data
+predict p* // predict p1: pr of choosen site, and p2: pr of choosen nest
+predict condp, condp hlevel(2) // predict condp: pr of choosing site given nest
+predict iv, iv // predict inclusive value for nest (log of dom of condp)
 //
 //
 // /* // predict confidence intervals manually
-//  predict xb, xb hlevel(2) // calc linear predictors
-//  predict stdp, stdp  // calc error // calculate error for xb - this line does work 
-//  generate lb = xb - invnormal(0.975)*error // calc lower ci for xb
-//  generate ub = xb + invnormal(0.975)*error // calc upper ci for xb
-//   generate plb = invlogit(lb) // convert to lower ci for probabilities
-//  generate pub = invlogit(ub) // convert to upper ci for probabilities
+ predict xb, xb hlevel(2) // calc linear predictors
+ *predict stdp, stdp  // calc error // calculate error for xb - this line does work 
+ generate lb = xb - invnormal(0.975)*error // calc lower ci for xb
+ generate ub = xb + invnormal(0.975)*error // calc upper ci for xb
+  generate plb = invlogit(lb) // convert to lower ci for probabilities
+ generate pub = invlogit(ub) // convert to upper ci for probabilities
 // 
 //  // this way worked - calculated ci around p2
-//  predictnl pr = predict(), ci(t1 t2) // predict p2 (double check its the same) and ci
+ predictnl pr = predict(), ci(t1 t2) // predict p2 (double check its the same) and ci
 // */
 //
 // list trip_id choice cset gridid_alt  p2 p1 condp iv in 1/82, sepby(trip_id) divider
 //
 // /* Split by cset
-// list trip_id choice cset gridid_alt p1 p2 condp iv in 1/34, sepby(trip_id) divider
+ list trip_id choice cset gridid_alt p1 p2 condp iv in 1/34, sepby(trip_id) divider
 // list trip_id choice cset gridid_alt p1 p2 condp iv in 35/54, sepby(trip_id) divider
 // list trip_id choice cset gridid_alt p1 p2 condp iv in 55/62, sepby(trip_id) divider
 // list trip_id choice cset gridid_alt p1 p2 condp iv in 63/82, sepby(trip_id) divider

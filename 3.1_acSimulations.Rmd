@@ -145,9 +145,6 @@ The errors are assumed to follow the generalized extreme value (GEV) distributio
           Vj[ ,i] <- as.vector(rum_matrix %*% as.matrix(mvn_b[i,]))  
         }
         
-            dat %<>%
-        mutate(gridid_int = group_indices(., gridid_alt),
-         tripid_int = group_indices(., trip_id))  # making id integers
     #     
     # Vj <- as.data.table(Vj) # make data.table to save RAM
     # cols <- colnames(Vj) # save the names of the draws for later
@@ -360,7 +357,7 @@ Multiplied br numbers by corresponding probabilities. Note that because we adjus
 
 dat %<>% left_join(.,BRtrips, by = c("rampid" = "RampID"), suffix = c("", "_ramp"))
 
-    RUM_W <- dat %>% distinct(.,rampid, .keep_all = TRUE) %>%
+    RUM_W <- dat %>% distinct(.,ramp_id, .keep_all = TRUE) %>%
       # gravity function
       mutate(across(starts_with("TRIPS_ramp_prop"), ~.x*w.mean, .names = "welf_mean_{.col}" ),
              across(starts_with("upp_TRIPS"), ~.x*w.upp, .names = "welf_upp_{.col}" ),
